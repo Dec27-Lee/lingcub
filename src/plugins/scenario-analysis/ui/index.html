@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>分析器</title>
+  <style>
+    :root { color-scheme: light dark }
+    body { background: #171c26; color: #e7eaf0; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 0; padding: 20px; max-width: 760px }
+    @media (prefers-color-scheme: light) { body { background: #fff; color: #1c2330 } }
+    h1 { font-size: 16px }
+    code { background: rgba(127,127,127,.15); padding: 1px 4px; border-radius: 3px }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; max-width:620px }
+    .stat { border:1px solid rgba(127,127,127,.2); border-radius:8px; padding:10px }
+    .stat b { display:block; font-size:20px; margin-top:4px }
+    .muted { opacity:.55 }
+    #err { color:#c33 }
+  </style>
+</head>
+<body>
+  <h1>分析器 · 中间层插槽示例</h1>
+  <p>这个页面由 <code>scenario-analysis/ui.json</code> 贡献，宿主只负责加载，不把分析逻辑写进桌面代码。</p>
+  <p>分析事件：<code>message.analyzed</code>；分发事件：<code>distribution.decided</code>。</p>
+  <div id="live" class="muted">连接宿主…</div>
+  <script>
+    const id='analysis-'+Date.now();
+    parent.postMessage({type:'lingcub.request',id,method:'state'},'*');
+    window.addEventListener('message',(e)=>{
+      const d=e.data||{};
+      if(d.type!=='lingcub.response'||d.id!==id)return;
+      const live=document.getElementById('live');
+      if(!d.ok){live.innerHTML='<span id="err">宿主读取失败：'+(d.error||'未知')+'</span>';return}
+      const s=d.data.stats||{},a=s.analysis||{},o=s.outbox||{};
+      live.className='';
+      live.innerHTML='<div class="grid"><div class="stat"><span class="muted">事件</span><b>'+(s.events||0)+'</b></div><div class="stat"><span class="muted">分析成功</span><b>'+(a.ok||0)+'</b></div><div class="stat"><span class="muted">缺口 / 死信</span><b>'+(a.backlog||0)+' / '+(o.dead||0)+'</b></div></div>';
+    });
+  </script>
+</body>
+</html>

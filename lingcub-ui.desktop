@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=幺幺零 · Lingcub
+Comment=打开本机配置与运行面板（复用已跑实例）
+Terminal=false
+Categories=Development;
+# 通过 %k（本文件路径）反推项目根，整个目录挪位置也不会断
+Exec=sh -c 'exec "$(dirname "$1")/scripts/launch-ui.sh"' _ %k

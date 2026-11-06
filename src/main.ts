@@ -1,0 +1,279 @@
+#!/usr/bin/env node
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { resolve } from 'node:path'
+import { startUi } from './desktop/server.ts'
+import { assertAllowedRoot, loadConfigLayered, loadProjects } from './kernel/config.ts'
+import { readHookInfo } from './kernel/hook-server.ts'
+import { runRuntime } from './kernel/runtime.ts'
+import { discoverPluginsV2 } from './kernel/plugin-v2/index.ts'
+import { filterByOwnership } from './kernel/plugin-v2/ownership.ts'
+import { installedPlugins } from './kernel/plugin-v2/catalog.ts'
+import { switchProblems } from './kernel/plugin-v2/preflight.ts'
+import { resolvePluginSections } from './kernel/config-alias.ts'
+import { assemble, PLUGIN_DIR } from './kernel/wiring.ts'
+import { loadRules } from './routing/rules.ts'
+
+const ROOT = process.cwd()
+const cmd = process.argv[2] ?? 'doctor'
+
+function log(level: string, msg: string): void {
+  process.stderr.write(`${level.toUpperCase()} ${msg}\n`)
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = []
+  for await (const c of process.stdin) chunks.push(Buffer.from(c as Buffer))
+  return Buffer.concat(chunks).toString('utf8')
+}
+
+/** claude 的钩子调起我们：把 stdin 的 JSON 转给常驻进程。常驻没跑就静默成功，不打断 claude。 */
+async function hookPost(): Promise<void> {
+  const arg = process.argv[4]
+  const KINDS = ['stop', 'notify', 'ask', 'permission', 'session-start'] as const
+  type HookKind = (typeof KINDS)[number]
+  const kind: HookKind = (KINDS as readonly string[]).includes(arg ?? '') ? (arg as HookKind) : 'stop'
+  const raw = (await readStdin()).trim() || '{}'
+  // 钩子的失败必须在**磁盘上**留痕：claude 会把钩子的 stdout/stderr 吞掉，
+  // 只靠 log() 打印等于没有（2026-11-06 就是这样丢了一整轮回复，事后无从查起）。
+  const trace = (msg: string): void => {
+    try {
+      appendFileSync(
+        resolve(ROOT, 'data/hook-errors.log'),
+        `${new Date().toISOString()} ${kind} ${msg}\n`,
+        'utf8',
+      )
+    } catch {
+      /* 写不了就算了，绝不能因此打断 claude */
+    }
+  }
+  const info = readHookInfo(ROOT)
+  if (!info) {
+    log('WARN', '钩子端点没在跑（没有 data/hooks.json），这条结果先不回了')
+    trace('端点信息缺失（没有 data/hooks.json）')
+    return
+  }
+  const url = `http://127.0.0.1:${info.port}/${kind}?t=${info.token}`
+  // 重试一次：端点在重启窗口里会有几百毫秒不可用，一次失败就丢一轮回复太亏
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: raw,
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!res.ok) {
+        trace(`HTTP ${res.status} ${(await res.text()).slice(0, 200)}`)
+        log('WARN', `钩子转发失败：${res.status}`)
+        return
+      }
+      if (kind === 'ask' || kind === 'permission' || kind === 'session-start') {
+        process.stdout.write(await res.text())
+      }
+      return
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      if (attempt === 2) {
+        trace(`POST 失败（port=${info.port} pid=${info.pid}）：${msg}`)
+        log('WARN', `钩子转发失败：${msg}`)
+        return
+      }
+      await new Promise((r) => setTimeout(r, 400))
+    }
+  }
+}
+
+/** 把 Stop/Notification 钩子写进 claude 配置；默认只预演，加 --apply 才写，且先备份。 */
+async function hookInstall(apply: boolean): Promise<void> {
+  const claudeDir = process.env.CLAUDE_CONFIG_DIR ?? resolve(homedir(), '.claude')
+  const file = resolve(claudeDir, 'settings.json')
+  const stopCmd = `node "${resolve(ROOT, 'dist/main.js')}" hook post stop`
+  const notifyCmd = `node "${resolve(ROOT, 'dist/main.js')}" hook post notify`
+  const askCmd = `node "${resolve(ROOT, 'dist/main.js')}" hook post ask`
+  const permCmd = `node "${resolve(ROOT, 'dist/main.js')}" hook post permission`
+  const startCmd = `node "${resolve(ROOT, 'dist/main.js')}" hook post session-start`
+
+  const rawText = existsSync(file) ? readFileSync(file, 'utf8') : ''
+  const hadBom = rawText.charCodeAt(0) === 0xfeff
+  const current = rawText ? (JSON.parse(hadBom ? rawText.slice(1) : rawText) as Record<string, unknown>) : {}
+  const hooks = (current['hooks'] ?? {}) as Record<string, unknown[]>
+  // 装自己的钩子时顺手清掉**旧桥接**留下的钩子：两套并存会让每条消息发两遍，
+  // 而且旧桥接的钩子还会抢答选择题/授权。只按路径认，不碰别人的钩子。
+  const LEGACY = 'feishu-bridge-claude'
+  const withoutLegacy = (list: unknown[]): unknown[] =>
+    list
+      .map((g) => {
+        const group = g as { hooks?: { command?: string }[] }
+        const kept = (group.hooks ?? []).filter((h) => !String(h.command ?? '').includes(LEGACY))
+        return { ...group, hooks: kept }
+      })
+      .filter((g) => (g.hooks ?? []).length > 0)
+
+  /** 同一个事件里，同一条命令只留一份（JSON 比较会因转义漏判，必须按命令原串比）。 */
+  const dedupe = (list: unknown[]): unknown[] => {
+    const seen = new Set<string>()
+    const out: unknown[] = []
+    for (const g of list) {
+      const group = g as { hooks?: { command?: string }[] }
+      const kept: { type: string; command: string }[] = []
+      for (const h of group.hooks ?? []) {
+        const hh = h as { type?: string; command?: string }
+        const command = String(hh.command ?? '')
+        if (!command || seen.has(command)) continue
+        seen.add(command)
+        kept.push({ type: hh.type ?? 'command', command })
+      }
+      if (kept.length) out.push({ ...group, hooks: kept })
+    }
+    return out
+  }
+
+  const withEntry = (key: string, cmd: string): unknown[] => {
+    const list = dedupe(withoutLegacy(Array.isArray(hooks[key]) ? (hooks[key] as unknown[]) : []))
+    const has = list.some((g) =>
+      ((g as { hooks?: { command?: string }[] }).hooks ?? []).some((h) => h.command === cmd),
+    )
+    return has ? list : [...list, { hooks: [{ type: 'command', command: cmd }] }]
+  }
+  const next = {
+    ...current,
+    hooks: {
+      ...hooks,
+      Stop: withEntry('Stop', stopCmd),
+      Notification: withEntry('Notification', notifyCmd),
+      PreToolUse: withEntry('PreToolUse', askCmd),
+      PermissionRequest: withEntry('PermissionRequest', permCmd),
+      SessionStart: withEntry('SessionStart', startCmd),
+    },
+  }
+
+  log('INFO', `目标文件：${file}`)
+  log('INFO', `将写入 Stop：${stopCmd}`)
+  log('INFO', `将写入 Notification：${notifyCmd}`)
+  log('INFO', `将写入 PreToolUse（只匹配 AskUserQuestion）：${askCmd}`)
+  log('INFO', `将写入 PermissionRequest：${permCmd}`)
+  log('INFO', `将写入 SessionStart（注入飞书输入约定）：${startCmd}`)
+  if (JSON.stringify(next) === JSON.stringify(current)) {
+    log('INFO', '已装过，无需改动')
+    return
+  }
+  if (!apply) {
+    log('INFO', `已清掉旧桥接（${LEGACY}）留下的钩子；接下来只保留本项目的`)
+  log('INFO', '这是预演（没写盘）。确认后加 --apply；会先备份原文件')
+    return
+  }
+  if (existsSync(file)) {
+    const backup = `${file}.bak-lingcub-${Date.now()}`
+    copyFileSync(file, backup)
+    log('INFO', `已备份：${backup}`)
+  } else {
+    mkdirSync(claudeDir, { recursive: true })
+  }
+  writeFileSync(file, (hadBom ? '\uFEFF' : '') + JSON.stringify(next, null, 2) + '\n', 'utf8')
+  log('INFO', '已写入钩子配置')
+}
+
+async function cmdHook(): Promise<void> {
+  const sub = process.argv[3] ?? ''
+  if (sub === 'post') return hookPost()
+  if (sub === 'install') return hookInstall(process.argv.includes('--apply'))
+  throw new Error(`未知 hook 子命令：${sub || '(空)'}（可用 post / install）`)
+}
+
+async function cmdRun(): Promise<void> {
+  const tickMs = Number(process.env.LINGCUB_TICK_MS ?? 1000)
+  await runRuntime({ root: ROOT, tickMs: Number.isFinite(tickMs) && tickMs > 0 ? tickMs : 1000 })
+}
+
+async function cmdUi(): Promise<void> {
+  const port = Number(process.env.LINGCUB_UI_PORT ?? 0)
+  const idle = Number(process.env.LINGCUB_UI_IDLE_MS ?? 15 * 60_000)
+  const { startUi } = await import('./desktop/server.ts')
+  const ui = await startUi({
+    root: ROOT,
+    port: Number.isFinite(port) ? port : 0,
+    idleExitMs: Number.isFinite(idle) ? idle : 15 * 60_000,
+    open: !process.argv.includes('--no-open'),
+  })
+  log('INFO', `面板已启动：${ui.url}`)
+  const stop = (): void => {
+    void ui.close().then(() => process.exit(0))
+  }
+  process.once('SIGINT', stop)
+  process.once('SIGTERM', stop)
+}
+
+async function doctor(): Promise<void> {
+  const config = loadConfigLayered(resolve(ROOT, 'config/lingcub.yaml'), resolve(ROOT, 'data/local.json'))
+  const projects = loadProjects(resolve(ROOT, 'config/projects.yaml'))
+
+  for (const w of projects.workspaces) {
+    const policy = config.executor_policies[w.executor]
+    if (!policy) throw new Error(`workspace ${w.id} 的执行器 ${w.executor} 无策略`)
+    assertAllowedRoot(w.root, policy.allowRoots)
+  }
+
+  const rules = loadRules(resolve(ROOT, 'config/rules.yaml'))
+
+  for (const [name, c] of Object.entries(config.classifiers)) {
+    if (!existsSync(resolve(ROOT, c.prompt))) {
+      throw new Error(`classifiers.${name} 的提示词文件不存在：${c.prompt}`)
+    }
+  }
+
+  const { ports, unused, installed } = await assemble(PLUGIN_DIR, config, log)
+  const v2 = await discoverPluginsV2(PLUGIN_DIR)
+  const owned = filterByOwnership(v2, config.control, resolvePluginSections(config).enabled)
+  const catalog = installedPlugins(installed, v2, config)
+  const active = catalog.filter((p) => p.enabled)
+  const idle = catalog.filter((p) => !p.enabled)
+
+  const enabledSources = Object.entries(config.sources)
+    .filter(([, v]) => v.enabled)
+    .map(([k]) => k)
+  log('INFO', `mode=${config.mode} 并发上限=${config.limits.maxConcurrentSessions}`)
+  log('INFO', `工作区 ${projects.workspaces.length} 个：`)
+  for (const w of projects.workspaces) {
+    log('INFO', `  ${w.id.padEnd(18)} ${w.executor.padEnd(7)} ${w.isolation.padEnd(9)} ${w.root}`)
+  }
+  log('INFO', `启用来源 ${enabledSources.length} 个：${enabledSources.join(', ') || '(无)'}`)
+  log('INFO', `规则 ${rules.rules.length} 条：${rules.rules.map((r) => r.id).join(', ') || '(无)'}`)
+  log(
+    'INFO',
+    `已安装插件 ${catalog.length} 个：启用 ${active.length}（${active.map((p) => p.id).join(', ') || '无'}），停用 ${idle.length}（${idle.map((p) => p.id).join(', ') || '无'}）`,
+  )
+  log(
+    'INFO',
+    `端口就绪：源 ${ports.sources.size} / 分类器 ${ports.classifiers.size} / 执行器 ${ports.executors.size} / 频道 ${ports.channels.size}`,
+  )
+  if (unused.length) log('WARN', `有插件未被 config 引用：${unused.join(', ')}`)
+  for (const s of owned.skipped) log('WARN', `插件 ${s.id} 未装配：${s.reason}`)
+  for (const p of switchProblems(config, resolvePluginSections(config).enabled)) log('WARN', `切换检查：${p}`)
+  log('INFO', 'doctor 通过')
+}
+
+if (cmd === 'doctor') {
+  await doctor().catch((e: unknown) => {
+    log('ERROR', e instanceof Error ? e.message : String(e))
+    process.exitCode = 1
+  })
+} else if (cmd === 'run') {
+  await cmdRun().catch((e: unknown) => {
+    log('ERROR', e instanceof Error ? e.message : String(e))
+    process.exitCode = 1
+  })
+} else if (cmd === 'ui') {
+  await cmdUi().catch((e: unknown) => {
+    log('ERROR', e instanceof Error ? e.message : String(e))
+    process.exitCode = 1
+  })
+} else if (cmd === 'hook') {
+  await cmdHook().catch((e: unknown) => {
+    log('ERROR', e instanceof Error ? e.message : String(e))
+    process.exitCode = 1
+  })
+} else {
+  log('ERROR', `未知命令：${cmd}（可用：doctor | run | ui | hook）`)
+  process.exitCode = 1
+}

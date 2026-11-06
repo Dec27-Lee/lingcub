@@ -1,0 +1,1032 @@
+[
+  {
+    "name": "群聊-bug-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "e265d0336443f1e7",
+              "intentId": "8ed7c98622e4a89d",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n登录页点导出报错 500\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "7c5e510690de3861",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "e265d0336443f1e7",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "群聊-bug-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "群聊-bug-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "私聊-问句-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "45dc7e1822badd38",
+              "intentId": "2e6251923f95b838",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 私聊 oc_dm\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n这个接口怎么调？\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "8f733902904c1b80",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "45dc7e1822badd38",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "私聊-问句-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "私聊-问句-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "群聊-@我-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "463fd6bd50cab2ee",
+              "intentId": "8df104debc1a993c",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n@我 看下这个报错\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "bd583eaf1e256f3a",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "463fd6bd50cab2ee",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "群聊-@我-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "群聊-@我-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "群聊-闲聊-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "2697561c5772d8ab",
+              "intentId": "197dfe97f8e38b0c",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n今天天气不错\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "5ae61e5c3bc37d64",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "2697561c5772d8ab",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "群聊-闲聊-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "群聊-闲聊-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "文档-待办-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "7a870ccc1971f746",
+              "intentId": "46e943adb611b0c6",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 文档 doc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n文档待办：补充接口说明\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "62bd8bbd4f7ecfb6",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "7a870ccc1971f746",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "文档-待办-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "文档-待办-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "待办-任务-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "d240c1f521762811",
+              "intentId": "8c74d0a0e507af57",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 待办 task_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n待办：修登录\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "d68adcafe3865429",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "d240c1f521762811",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "待办-任务-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "待办-任务-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "空正文-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "fb4d80019340fe16",
+              "intentId": "53993a4d5002578e",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n(空)\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "6963411cfe841a4b",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "fb4d80019340fe16",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "空正文-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "空正文-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "图片消息-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "e759ca0f3f9762e3",
+              "intentId": "5cab5ba4ed85c44b",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n看这张图\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "0fac5e08f3b2431d",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "e759ca0f3f9762e3",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "图片消息-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "图片消息-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "引用回复-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "fdde83777aa7dbba",
+              "intentId": "d7ab1de3da7339d2",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n这个还是不行\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "cfad15dc801a629e",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "fdde83777aa7dbba",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "引用回复-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "引用回复-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "未知项目-bug",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "2f1d7611cb17595f",
+              "intentId": "39ff4af837bc0c6a",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：导出报错 500\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n验收一下\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n给了具体故障现象",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "5896332ec050fac4",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "2f1d7611cb17595f",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "未知项目-question",
+    "result": {
+      "outcome": "skipped",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "未知项目-none",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "observe-档",
+    "result": {
+      "outcome": "observed",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "suggest-档",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "reply_only",
+            "text": "建议派工：personal-lingcub\n执行器：dsh\n工作区：E:\\Develop_E\\lingcub\n\n确认后回复「执行」才会真的开工（当前建议档不自动派工）。"
+          },
+          "key": "ed3845600944b1b1",
+          "kind": "reply_only",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "e265d0336443f1e7",
+          "project": "personal-lingcub",
+          "status": "queued"
+        }
+      ]
+    }
+  },
+  {
+    "name": "规则命中",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "dispatch_session",
+            "work": {
+              "executor": "dsh",
+              "id": "f87df467c1b03e76",
+              "intentId": "9c14d95ee23b7b7a",
+              "kind": "session",
+              "project": "personal-lingcub",
+              "prompt": "# 任务：规则命中\n\n来源：source-feishu-im / 群聊 oc_1\n发起人：ou_1\n发生时间：2026-11-03T08:59:00.000Z\n\n## 原文\n\n这个 bug 又出现了\n\n## 工作区\n\n- 项目：个人 · 幺幺零（personal-lingcub）\n\n## 判断依据\n\n规则 always 命中",
+              "status": "queued",
+              "workspace": "E:\\Develop_E\\lingcub"
+            }
+          },
+          "key": "72d2fec04dff2fe4",
+          "kind": "dispatch_session",
+          "status": "done"
+        }
+      ],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": [
+        {
+          "executor": "dsh",
+          "id": "f87df467c1b03e76",
+          "project": "personal-lingcub",
+          "status": "running"
+        }
+      ]
+    }
+  },
+  {
+    "name": "命令-#help",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "命令-#目录",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "命令-#状态",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "命令-#停止",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "命令-#新会话",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "命令-#不存在命令",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "命令-E:\\Develop_E\\lingcub",
+    "result": {
+      "outcome": "ignored",
+      "rows": [],
+      "sessions": [],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "已绑定-#status",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "chatId": "oc_1",
+            "kind": "reply_only",
+            "replyTo": "om_<id>",
+            "sessionId": "sess-gold",
+            "text": "窗口：金标窗口\n状态：active\n工作区：personal-lingcub\n执行器：dsh"
+          },
+          "key": "218e472074c20a8b",
+          "kind": "reply_only",
+          "status": "done"
+        }
+      ],
+      "sessions": [
+        {
+          "chatId": "oc_1",
+          "executor": "dsh",
+          "id": "sess-gold",
+          "ownerId": "ou_1",
+          "rootMessageId": "om_<id>",
+          "sessionId": "exec-1",
+          "status": "active",
+          "threadId": "th_1",
+          "title": "金标窗口",
+          "workspace": "personal-lingcub"
+        }
+      ],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "已绑定-#new",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "chatId": "oc_1",
+            "kind": "reply_only",
+            "replyTo": "om_<id>",
+            "sessionId": "sess-gold",
+            "text": "这个窗口已关闭。直接发一条新任务，就会开一个新窗口。"
+          },
+          "key": "fb21f0758012469d",
+          "kind": "reply_only",
+          "status": "done"
+        }
+      ],
+      "sessions": [
+        {
+          "chatId": "oc_1",
+          "executor": "dsh",
+          "id": "sess-gold",
+          "ownerId": "ou_1",
+          "rootMessageId": "om_<id>",
+          "sessionId": "exec-1",
+          "status": "stopped",
+          "threadId": "th_1",
+          "title": "金标窗口",
+          "workspace": "personal-lingcub"
+        }
+      ],
+      "tick": {
+        "dead": 0,
+        "done": 1,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "已绑定-#stop",
+    "result": {
+      "outcome": "queued",
+      "rows": [
+        {
+          "action": {
+            "kind": "stop_session",
+            "sessionId": "sess-gold"
+          },
+          "key": "d77ffcc8cc828289",
+          "kind": "stop_session",
+          "status": "done"
+        },
+        {
+          "action": {
+            "chatId": "oc_1",
+            "kind": "reply_only",
+            "replyTo": "om_<id>",
+            "sessionId": "sess-gold",
+            "text": "已停止：金标窗口"
+          },
+          "key": "88b4aae328a842c7",
+          "kind": "reply_only",
+          "status": "done"
+        }
+      ],
+      "sessions": [
+        {
+          "chatId": "oc_1",
+          "executor": "dsh",
+          "id": "sess-gold",
+          "ownerId": "ou_1",
+          "rootMessageId": "om_<id>",
+          "sessionId": "exec-1",
+          "status": "stopped",
+          "threadId": "th_1",
+          "title": "金标窗口",
+          "workspace": "personal-lingcub"
+        }
+      ],
+      "tick": {
+        "dead": 0,
+        "done": 2,
+        "failed": 0
+      },
+      "works": []
+    }
+  },
+  {
+    "name": "已绑定-#停止",
+    "result": {
+      "outcome": "posted",
+      "rows": [
+        {
+          "action": {
+            "kind": "post_message",
+            "sessionId": "sess-gold",
+            "text": "#停止"
+          },
+          "key": "710fda930be61d0c",
+          "kind": "post_message",
+          "status": "pending"
+        }
+      ],
+      "sessions": [
+        {
+          "chatId": "oc_1",
+          "executor": "dsh",
+          "id": "sess-gold",
+          "ownerId": "ou_1",
+          "rootMessageId": "om_<id>",
+          "sessionId": "exec-1",
+          "status": "active",
+          "threadId": "th_1",
+          "title": "金标窗口",
+          "workspace": "personal-lingcub"
+        }
+      ],
+      "tick": {
+        "dead": 0,
+        "done": 0,
+        "failed": 1
+      },
+      "works": []
+    }
+  }
+]

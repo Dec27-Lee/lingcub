@@ -1,0 +1,24 @@
+# 项目 → 工作区 → 执行器。模型不得猜路径，只认这里。
+
+workspaces:
+  - id: tt-design-space
+    name: 公司 · 天通设计空间
+    kind: umbrella                      # 单根多仓，不做 worktree
+    root: 'E:\Develop_E\tt\tt-design-space-ai'
+    executor: claude
+    isolation: session                  # 会话级隔离
+    concurrency: 1                      # 同一时刻只动一个会话
+    freshSession: true                  # 一任务一会话，禁止 resume 大历史
+    repoHint: from-router               # 子仓库由 cc 读路由文件自行定位
+    reposIndex: workspace/GITLAB-REPOSITORIES.md
+    router: workspace/REPOSITORY-ROUTER.md
+    aliases: [tt, 设计空间, tongclaw, 天通]
+
+  - id: personal-lingcub
+    name: 个人 · 幺幺零
+    kind: repo
+    root: 'E:\Develop_E\lingcub'
+    executor: dsh
+    isolation: worktree                 # 单仓库，可并行
+    concurrency: 2
+    aliases: [lingcub, 幺幺零]

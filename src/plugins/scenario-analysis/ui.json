@@ -1,0 +1,8 @@
+{
+  "nav": [
+    { "id": "analysis", "label": "分析", "page": "index.html", "order": 10 }
+  ],
+  "slots": [
+    { "slot": "main.header", "page": "header.html", "height": 44 }
+  ]
+}

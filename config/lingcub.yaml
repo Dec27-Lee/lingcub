@@ -1,0 +1,262 @@
+# 主配置：源、频道、判断器、执行器策略、上限。
+# 改这里不需要改代码。
+# 约定：谁引用插件，那一条配置就是该插件的配置（plugin/enabled 是内核记账字段，不进插件）。
+
+mode: observe            # observe(只记录) | suggest(建议+人工确认) | auto(白名单自动)
+
+log:
+  level: info
+  file: data/lingcub.log
+
+store:
+  path: data/lingcub.db
+
+sources:
+  dingtalk-im:
+    enabled: true
+    plugin: source-dingtalk
+    binary: dws
+    # 个人 IM 用 +listen-im；all-direct 的事件本身是私聊，不靠 channelType 猜
+    args: ['event', '+listen-im', '--kind', 'all-direct', '-f', 'ndjson']
+    groupValues: []
+    fallbackChannelKind: dm
+    # 实测字段：message_id / content / conversation_id / sender_open_dingtalk_id
+    fields:
+      externalId: message_id
+      text: content
+      channelId: conversation_id
+      actorId: sender_open_dingtalk_id
+      occurredAt: create_time
+      actorName: sender
+
+  # 群聊里 at 我；独立订阅，不改变单聊来源。
+  dingtalk-at:
+    enabled: true
+    plugin: source-dingtalk-at
+    binary: dws
+    args: ['event', '+listen-im', '--kind', 'at-me', '-f', 'ndjson']
+    fallbackChannelKind: group
+
+  # 全部群消息；大群会很多，后续可按需加白名单。
+  dingtalk-group:
+    enabled: true
+    plugin: source-dingtalk-group
+    binary: dws
+    args: ['event', '+listen-im', '--kind', 'all-group', '-f', 'ndjson']
+    fallbackChannelKind: group
+
+  # 出站消息：个人订阅不会回推自己发的消息，只能轮询历史并筛 senderId=self。
+  dingtalk-sent:
+    enabled: true
+    plugin: source-dingtalk-sent
+    binary: dws
+    selfId: 'DdR25nblVrmD6TZG3ko9k6TDSu5r6gEq3'
+    intervalMs: 10000
+    lookbackMinutes: 10
+
+  feishu-im:
+    enabled: true
+    plugin: source-feishu-im
+    binary: lark-cli
+    args: ['event', 'consume', 'im.message.receive_v1', '--as', 'bot']
+
+  # 卡片按钮回调：与收消息是**两个独立订阅**（im.message.receive_v1 收不到按钮点击）。
+  # 实测载荷取自参考项目日志：{type:'card.action.trigger', event_id, operator_id, message_id, chat_id, action_value}
+  feishu-card:
+    enabled: true
+    plugin: source-feishu-card
+    binary: lark-cli
+    args: ['event', 'consume', 'card.action.trigger', '--as', 'bot']
+
+channels:
+  feishu:
+    # 预演：只把「会执行的命令行」写进日志，不真的调 CLI。切换前先看一眼发什么。
+    dryRun: false
+    plugin: channel-feishu
+    defaultChatId: ''    # 填 oc_ 开头的 chatId，否则回消息会失败
+    binary: lark-cli
+    # 新话题的状态卡自动置顶（失败只告警，不影响发卡）
+    pinCards: true
+
+classifiers:
+  llm:
+    plugin: classifier-llm
+    prompt: prompts/classify.md
+    minConfidence: 0.3   # 低于此值只记录，不产生 Work
+    binary: dsh
+    args: ['--profile', 'headless', '--json', '-']
+
+executor_policies:
+  claude:
+    plugin: executor-claude
+    allowRoots: ['E:\Develop_E\tt', 'E:\Develop_E\lingcub']
+    defaultBudgetUsd: 2
+    maxTurns: 40
+    binary: claude
+    # 实测（claude 2.1.317）：logs/stop 只认短 id（--bg 回的那 8 位），不认完整 uuid
+    logsArgs: ['logs', '{{sessionId}}']
+    stopArgs: ['stop', '{{sessionId}}']
+  dsh:
+    plugin: executor-dsh
+    allowRoots: ['E:\Develop_E']
+    binary: dsh
+
+# 自动回复：窗口停下或跑太久时替你说一句（参考项目 auto-reply 插件的判据）
+# 默认关着——没人希望机器人在你没配的情况下自己开口。
+auto_reply:
+  enabled: false
+  pollSeconds: 5
+  cooldownSeconds: 60      # 同一窗口这个间隔内最多自动回一次，与命中哪条策略无关
+  policies: []
+  # 例子（抄进 policies 即可）：
+  # - reply: '要不要我接着把剩下的改完？'
+  #   enabled: true
+  #   triggers:
+  #     - when: stopped            # 这一轮结束了
+  #       afterSeconds: 900        # 安静 15 分钟才判
+  #     - when: stopped
+  #       match:
+  #         - { mode: contains, text: 'API Error' }
+  # - reply: '还在跑，别急'
+  #   triggers:
+  #     - when: busy
+  #       busySeconds: 1800
+
+# 过期数据清理：启动一次，之后每小时一次
+cleanup:
+  enabled: true
+  imageTtlDays: 7          # 图片按天目录保留 7 天
+  mappingTtlDays: 14       # 「引用这条消息能找回窗口」的映射保留 14 天
+  questionTtlHours: 2      # 超时未答的提问记录
+  maxLogBytes: 5242880     # 单个日志超过 5MB 只留尾部一半
+
+sessions:
+  # judge：群里的新消息照常判断；open：群里的新消息就是「开一个窗口」，正文当话题名。
+  # 接飞书当控制台时用 open，否则用 judge。
+  newTopicPolicy: judge
+  choiceTtlMs: 1800000   # 等人选工作区的有效期（30 分钟）
+  pickMax: 20            # 选择工作区时最多列几个（按最近活跃排序）
+  resumeMax: 8           # 恢复会话时最多列几个
+  staleMinutes: 30       # 会话这么久没动静 = 窗口已经不在了：撤置顶（关窗没有事件可捕获）
+
+limits:
+  maxConcurrentSessions: 2
+  maxSessionMB: 80       # 单会话历史超此体积后强制换新会话
+
+# v2 插件（清单 v2）。先关着：确认钉钉渠道与派工场景后再打开，避免和旧 source 重复消费。
+plugins:
+  # 媒体归一：把平台 mediaId 解成可分发图片，分发消费者不再直接调 dws/lark-cli
+  media:
+    plugin: capability-media
+    enabled: true
+  # 中间层 AI 能力：模型命令、提示词、超时都在这里换；默认走已登录的 claude CLI
+  analyzer:
+    plugin: capability-ai
+    enabled: true
+    binary: claude
+    args: ['-p', '--output-format', 'text']
+    prompt: prompts/summarize.md
+    timeoutMs: 90000
+    maxChars: 80
+  # 独立飞书自定义机器人 webhook；拿到群里的 webhook 后填 url/secret 并启用
+  feishu-webhook:
+    plugin: channel-feishu-webhook
+    enabled: false
+    url: ''
+    secret: ''
+  dingtalk:
+    plugin: channel-dingtalk
+    # 只注册 transport.dingtalk.send（回执）；事件消费交给 source-dingtalk，避免双消费。
+    enabled: true
+    enabledO2o: false
+    enabledGroup: false
+  # P2.6 终端执行器：消费 session.open.requested；旧 task.open 仍走 executor_policies.claude。
+  claude-v2:
+    plugin: executor-claude-v2
+    enabled: true
+    allowRoots: ['E:\Develop_E\tt', 'E:\Develop_E\lingcub']
+    terminal: true
+    binary: claude
+    defaultBudgetUsd: 2
+    maxTurns: 40
+    logsArgs: ['logs', '{{sessionId}}']
+    stopArgs: ['stop', '{{sessionId}}']
+  dsh-v2:
+    plugin: executor-dsh-v2
+    enabled: true
+    allowRoots: ['E:\Develop_E']
+    binary: dsh
+  # 文档端口：只注册能力，不改消息入口；真实 block_replace 已用测试文档验证（2026-11-04）
+  feishu-doc:
+    plugin: capability-doc-feishu
+    enabled: true
+
+scenarios:
+  # 确定性分发：先按配置决定出口，出口消费者只读 distribution.decided
+  distribution:
+    plugin: scenario-distribution
+    enabled: true
+    rules:
+      - id: dingtalk-to-feishu
+        when:
+          sources:
+            - source-dingtalk
+            - source-dingtalk-at
+            - source-dingtalk-group
+            - source-dingtalk-sent
+        targets: [feishu-card]
+      # 需要自动派工时再打开（会真的开执行器会话）：
+      # - id: dingtalk-urgent-dispatch
+      #   when: { sources: [source-dingtalk], urgency: [high] }
+      #   targets: [feishu-card, dispatch]
+  # 平台中间层：所有渠道消息先做上下文 + AI 分析，再发 message.analyzed
+  analysis:
+    plugin: scenario-analysis
+    enabled: true
+    historyLimit: 20
+    retryDegraded: true
+    maxAttempts: 2
+    # 受控补分析：>0 时启动后最多补 N 条窗口外缺口；分发副作用会被抑制
+    backfillLimit: 0
+    backfillBeforeMinutes: 60
+  # 每条钉钉消息转一张卡到独立飞书群；chatId 填 oc_…，机器人需已在群内。
+  dingtalk-feishu-relay:
+    plugin: scenario-dingtalk-feishu-relay
+    # 等拿到独立群自定义机器人 webhook 后再开，避免每条消息落死信
+    enabled: false
+    chatId: ''
+    channel: channel-feishu-webhook
+    includeOutgoing: true
+  session-ready:
+    plugin: scenario-session-ready
+    enabled: true
+  session-result:
+    plugin: scenario-session-result
+    enabled: true
+    sources: [source-feishu-im, source-feishu-card-v2]
+    maxChars: 80
+  # 重点私聊：多窗口时不逐条转播，只把「等你决策 / 开窗失败 / （可选）跑完」发到私聊。
+  # dmChatId 填 p2p 会话 id（oc_…），空则整段不生效。
+  focus-dm:
+    plugin: scenario-focus-dm
+    enabled: false
+    dmChatId: ''
+    dmUserId: ''   # 填 ou_… 就按人直发（优先于 dmChatId）
+    notifyOnAsk: true
+    notifyOnTurnEnd: false
+    notifyOnOpenFailed: true
+    dedupeMinutes: 10
+  # 文档出口：默认关闭；需要时填 doc/heading 并把 doc 放进 distribution targets
+  doc-output:
+    plugin: scenario-doc-output
+    enabled: false
+    target: doc
+    doc: ''
+    heading: 消息摘要
+  dev-dispatch:
+    plugin: scenario-dev-dispatch
+    enabled: false
+    project: personal-lingcub
+  doc-todos:
+    plugin: scenario-doc-todos
+    enabled: false
