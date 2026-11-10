@@ -13,6 +13,7 @@
 import { z } from 'zod'
 import type { ManifestV2, PluginContextV2 } from '../../domain/plugin-v2.ts'
 import type { Session } from '../../domain/types.ts'
+import { extractJson } from '../../plugin-kit/json.ts'
 
 export const manifest: ManifestV2 = {
   v: 2,
@@ -48,6 +49,80 @@ function card(title: string, template: string, lines: string[]): unknown {
 }
 
 const clip = (s: string, max: number): string => (s.length <= max ? s : `${s.slice(0, max)}…`)
+
+/**
+ * 分析器回执的结构化字段。
+ *
+ * 窗口里跑的如果是「渠道消息分析」，回复体就是一段 JSON。原来照原文贴出来，
+ * 私聊里看到的是 `{"summary":"…","urgency":"normal",…}` —— 等于没渲染。
+ * points/need/context 是本轮新增的分析字段，旧回执只有 summary/urgency/entities 也能认。
+ */
+const AnalysisPayloadSchema = z.object({
+  summary: z.string().min(1),
+  urgency: z.enum(['low', 'normal', 'high']).optional(),
+  entities: z.array(z.string().min(1)).max(8).optional(),
+  points: z.array(z.string().min(1)).max(5).optional(),
+  need: z.string().optional(),
+  context: z.string().optional(),
+})
+
+export type AnalysisPayload = z.infer<typeof AnalysisPayloadSchema>
+
+/** 回复体是不是分析器 JSON；是就返回结构化字段，不是返回 undefined（走普通摘要）。 */
+export function parseAnalysisPayload(text: string): AnalysisPayload | undefined {
+  const raw = String(text || '').trim()
+  if (!raw || !raw.includes('{')) return undefined
+  const parsed = AnalysisPayloadSchema.safeParse(extractJson(raw))
+  if (!parsed.success) return undefined
+  const summary = parsed.data.summary.replace(/\s+/g, ' ').trim()
+  if (!summary) return undefined
+  const clean = (v: string | undefined): string | undefined => {
+    const t = (v ?? '').replace(/\s+/g, ' ').trim()
+    return t || undefined
+  }
+  return {
+    summary,
+    urgency: parsed.data.urgency,
+    entities: parsed.data.entities?.map((x) => x.trim()).filter(Boolean),
+    points: parsed.data.points?.map((x) => x.trim()).filter(Boolean),
+    need: clean(parsed.data.need),
+    context: clean(parsed.data.context),
+  }
+}
+
+const URGENCY: Record<NonNullable<AnalysisPayload['urgency']>, { icon: string; template: string }> = {
+  high: { icon: '🔴', template: 'red' },
+  normal: { icon: '✅', template: 'green' },
+  low: { icon: '⚪️', template: 'grey' },
+}
+
+/**
+ * 分析回执卡片：给人看的形态，不是 JSON。
+ *
+ * 标题 = 窗口名（颜色和图标表达紧急度）；正文三段：结论 → 关键点 → 需要你；
+ * 灰色页脚放与前文的关系、实体、工作区和「怎么继续」。
+ */
+export function buildTurnCard(opts: { title: string; analysis: AnalysisPayload; workspace?: string }): unknown {
+  const a = opts.analysis
+  const u = URGENCY[a.urgency ?? 'normal']
+  const main: string[] = [`**${a.summary}**`]
+  if (a.points?.length) main.push('', ...a.points.map((p) => `· ${p}`))
+  if (a.need && !/^(无|无需|不需要)/.test(a.need)) main.push('', `👉 **需要你**：${a.need}`)
+  const foot: string[] = []
+  if (a.context) foot.push(`↗ 跟前文：${a.context}`)
+  if (a.entities?.length) foot.push(`🏷 ${a.entities.join(' · ')}`)
+  if (opts.workspace) foot.push(`📁 \`${opts.workspace}\``)
+  foot.push('↩︎ 在这个窗口的话题里直接回复即可继续。')
+  return {
+    config: { wide_screen_mode: true },
+    header: { template: u.template, title: { tag: 'plain_text', content: `${u.icon} ${opts.title}` } },
+    elements: [
+      { tag: 'markdown', content: main.join('\n') },
+      // 每行单独包：飞书的行内标签不跨行，整段包住时颜色会失效
+      { tag: 'markdown', content: foot.map((line) => `<font color='grey'>${line}</font>`).join('\n') },
+    ],
+  }
+}
 
 /**
  * 私聊摘要：手机上一眼能读完，且**不把句子截断**。
@@ -191,10 +266,16 @@ export function setup(ctx: PluginContextV2): void {
     const p = e.payload as { sessionId?: string; text?: string }
     if (!p.sessionId) return
     const s = await sessionOf(p.sessionId)
+    const title = shortTitle(s?.title ?? p.sessionId.slice(0, 8))
+    const analysis = parseAnalysisPayload(p.text ?? '')
+    if (analysis) {
+      await send(`turn:${p.sessionId}`, buildTurnCard({ title, analysis, workspace: s?.workspace }))
+      return
+    }
     const summary = summarizeReply(p.text ?? '', cfg.maxChars)
     await send(
       `turn:${p.sessionId}`,
-      card(`✅ ${shortTitle(s?.title ?? p.sessionId.slice(0, 8))}`, 'green', [
+      card(`✅ ${title}`, 'green', [
         summary.lead,
         ...summary.points.map((x) => `· ${x}`),
         summary.more ? '…（还有内容，进话题看全文）' : '',

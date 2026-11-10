@@ -13,8 +13,16 @@ import type { Executor, Handle, Log } from '../domain/ports.ts'
 import type { Progress, Work } from '../domain/types.ts'
 import { assertAllowedRoot } from '../domain/allow-root.ts'
 import { deliverToPeer, findLivePeer } from './claude-pipe.ts'
-import { discover, discoverLiveSessions, discoverSessions, liveFromAgents, parseAgentsJson } from './claude-discover.ts'
+import {
+  discover,
+  discoverLiveSessions,
+  discoverSessions,
+  liveFromAgents,
+  parseAgentsJson,
+  type SessionHistory,
+} from './claude-discover.ts'
 import { ensureTrusted, trustStatus } from './claude-trust.ts'
+import { keepUserWindows } from './internal-claude.ts'
 import { assertNoPlaceholders, renderArgs } from './template.ts'
 import { runOnce } from './spawn.ts'
 
@@ -103,6 +111,10 @@ export function createClaudeExecutor(cfg: ClaudeConfig, log: Log): Executor {
     },
 
     async listLiveSessions() {
+      // 平台自己的摘要/分类子进程也是 claude 会话，但它们是「一次调用」不是「用户的窗口」：
+      // 混进来就会被接进飞书建话题、置顶，还会把 JSON 结果当窗口回复推出去。
+      // 两道闸：本次进程登记的（内存）+ 转录里的一次性调用标记（跨进程，重启也认）
+      const userWindows = (list: SessionHistory[]): SessionHistory[] => keepUserWindows(list)
       // 首选官方列举：带全 uuid 与 busy/idle，用户自己在终端开的会话也在里面
       try {
         const r = await runOnce({
@@ -112,12 +124,14 @@ export function createClaudeExecutor(cfg: ClaudeConfig, log: Log): Executor {
         })
         if (r.code === 0) {
           const agents = parseAgentsJson(r.stdout)
-          if (agents.length) return liveFromAgents(agents, { roots: cfg.allowRoots, maxAgeDays: cfg.resumeDays })
+          if (agents.length) {
+            return userWindows(liveFromAgents(agents, { roots: cfg.allowRoots, maxAgeDays: cfg.resumeDays }))
+          }
         }
       } catch {
         /* 落回注册表 */
       }
-      return discoverLiveSessions({ roots: cfg.allowRoots, maxAgeDays: cfg.resumeDays })
+      return userWindows(await discoverLiveSessions({ roots: cfg.allowRoots, maxAgeDays: cfg.resumeDays }))
     },
 
     async listWorkspaces() {

@@ -108,7 +108,7 @@ export function formatTokens(n: number, digits = 0): string {
  * 用 round 的话 96% 也会画成满格，看起来像上下文已经爆了；floor 保证
  * 「满格 ⇔ 真的到顶」，百分数仍按 round 显示。
  */
-export function contextBar(used: number, win: number): string {
+export function contextBar(used: number, win: number | undefined): string {
   if (!win || win <= 0) return ''
   const ratio = Math.max(0, Math.min(1, used / win))
   const cells = 4
@@ -170,8 +170,11 @@ function scanTranscriptStats(file: string): TranscriptStats | null {
   return { used, total }
 }
 
-/** 用量那一行：`📦 ██░░ 21% 108k · Tokens 1.2M`（取不到就空串）。 */
-export function statsLine(file: string | undefined, contextWindow: number): string {
+/**
+ * 用量那一行：`📦 ██░░ 21% 108k · Tokens 1.2M`（取不到就空串）。
+ * 分母由调用方经 `resolveContextWindow()` 解析；给不出分母就只写 token 数，不画百分比。
+ */
+export function statsLine(file: string | undefined, contextWindow: number | undefined): string {
   if (!file) return ''
   const s = transcriptStats(file)
   if (!s) return ''
@@ -433,4 +436,3 @@ export function isTurnOpen(file: string): boolean {
   }
   return false
 }
-

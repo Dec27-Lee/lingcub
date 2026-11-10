@@ -1,0 +1,529 @@
+# plugins 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: plugins
+domain: plugins
+scenarios:
+  - id: PLUG-UNIT-001
+    title: 分析降级后补扫重试：attempt=1 degraded，attempt=2 ok
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - analysis
+      - retry
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/analysis-retry.test.ts
+    assertions:
+      - 分析降级后补扫重试：attempt=1 degraded，attempt=2 ok
+    timeoutSec: 60
+    file: tests/specs/plugins/analysis-retry.test.ts
+  - id: PLUG-UNIT-002
+    title: AI 摘要任务包含同会话历史与当前消息
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - analysis
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/analysis.test.ts
+    assertions:
+      - AI 摘要任务包含同会话历史与当前消息
+      - AI 摘要解析 JSON、纯文本和长度上限
+      - AI 摘要任务：媒体提示不进提示词，模型只看得到占位符
+      - AI 分析解析 urgency/entities，并把字段带出去
+      - AI 分析解析 points/need/context，并裁掉超长字段
+      - AI 分析任务：把此前几条的分析结论一起给模型
+      - 分析事件 id：首轮稳定，重试生成独立事件
+    timeoutSec: 60
+    file: tests/specs/plugins/analysis.test.ts
+  - id: PLUG-INT-003
+    title: 钉钉渠道：双 consume 只开一个也能入站，事件进 events + event_log
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - channel
+      - dingtalk
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/channel-dingtalk.test.ts
+    assertions:
+      - 钉钉渠道：双 consume 只开一个也能入站，事件进 events + event_log
+      - 钉钉渠道：回执走模板参数，成功取 message_id；失败按 code 抛错
+    timeoutSec: 60
+    file: tests/specs/plugins/channel-dingtalk.test.ts
+  - id: PLUG-UNIT-004
+    title: 预演：发文本只记命令行，不真调 CLI
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - channel
+      - dryrun
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/channel-dryrun.test.ts
+    assertions:
+      - 预演：发文本只记命令行，不真调 CLI
+      - 预演：发卡/改卡/置顶/下载图片都只记命令行
+    timeoutSec: 60
+    file: tests/specs/plugins/channel-dryrun.test.ts
+  - id: PLUG-UNIT-005
+    title: 钉钉飞书中转卡：正文带来源、发送人、会话和消息内容
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - dingtalk
+      - relay
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/dingtalk-relay.test.ts
+    assertions:
+      - 钉钉飞书中转卡：正文带来源、发送人、会话和消息内容
+      - 钉钉飞书中转卡：UTC 时间统一显示北京时间
+      - 钉钉飞书中转卡：私聊蓝色、标题不带群名
+      - 钉钉飞书中转卡：有 img_key 的图片变成卡片 img，不把 mediaId 留在正文
+      - 钉钉飞书中转卡：DWS 的下载命令提示不出现在卡片里
+      - 钉钉飞书中转卡：图片下载失败只留占位，不带命令提示
+      - 钉钉飞书中转卡：正文后接灰底色块总结，不带图标和标签
+      - 钉钉飞书中转卡：自己发出的消息显示“我”
+    timeoutSec: 60
+    file: tests/specs/plugins/dingtalk-relay.test.ts
+  - id: PLUG-UNIT-006
+    title: 钉钉出站来源：历史里只保留 senderId=self，映射成 dm 事件
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - dingtalk
+      - sent
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/dingtalk-sent.test.ts
+    assertions:
+      - 钉钉出站来源：历史里只保留 senderId=self，映射成 dm 事件
+    timeoutSec: 60
+    file: tests/specs/plugins/dingtalk-sent.test.ts
+  - id: PLUG-UNIT-007
+    title: backfill 分析不触发任何分发出口
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - distribution
+      - backfill
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/distribution-backfill.test.ts
+    assertions:
+      - backfill 分析不触发任何分发出口
+    timeoutSec: 60
+    file: tests/specs/plugins/distribution-backfill.test.ts
+  - id: PLUG-UNIT-008
+    title: 分发决策：先匹配高优先级规则，返回多出口
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - distribution
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/distribution.test.ts
+    assertions:
+      - 分发决策：先匹配高优先级规则，返回多出口
+      - 分发决策：来源规则命中，规则顺序决定结果
+      - 分发决策：没有规则命中时 targets 为空，不猜默认出口
+    timeoutSec: 60
+    file: tests/specs/plugins/distribution.test.ts
+  - id: PLUG-UNIT-009
+    title: doc-feishu：清单 id/role 与默认参数模板（strict 拒未知键）
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - doc
+      - feishu
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/doc-feishu.test.ts
+    assertions:
+      - doc-feishu：清单 id/role 与默认参数模板（strict 拒未知键）
+      - doc-feishu：read 取 revision 与 markdown，doc 占位符渲染进 argv
+      - doc-feishu：read 缺 revision_id 时回退正文指纹
+      - doc-feishu：命令退出非 0 即失败，不把 stdout 当结果
+      - doc-feishu：writeSection 按小节 block_replace，stdin 收到 XML
+      - doc-feishu：fetch 的 revision 与调用方期望不一致时冲突，不写
+      - doc-feishu：找不到小节就报错，不猜位置
+      - doc-feishu：写命令退出非 0 即失败
+      - doc-feishu：信封 ok=false 按失败处理（exit 0 也不算成功）
+      - doc-feishu：write 拒绝整篇覆盖（docx 会丢评论/资源）
+    timeoutSec: 60
+    file: tests/specs/plugins/doc-feishu.test.ts
+  - id: PLUG-UNIT-010
+    title: 文档出口：doc target 命中时按快照 revision 提交 doc.write
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - doc
+      - output
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/doc-output.test.ts
+    assertions:
+      - 文档出口：doc target 命中时按快照 revision 提交 doc.write
+      - 文档出口：backfill 不写文档
+    timeoutSec: 60
+    file: tests/specs/plugins/doc-output.test.ts
+  - id: PLUG-UNIT-011
+    title: dsh 执行器：同工作区 60 秒内只起一个任务，第二个请求给明确失败原因
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - dsh
+      - gate
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/dsh-gate.test.ts
+    assertions:
+      - dsh 执行器：同工作区 60 秒内只起一个任务，第二个请求给明确失败原因
+      - open-gate：闸门键含模式与工作区，第二次立刻被拒
+    timeoutSec: 60
+    file: tests/specs/plugins/dsh-gate.test.ts
+  - id: PLUG-UNIT-012
+    title: start：句柄用首行 session 的真实 id，Work id 在 dsh 这边不存在
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - executor
+      - dsh
+      - post
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/executor-dsh-post.test.ts
+    assertions:
+      - start：句柄用首行 session 的真实 id，Work id 在 dsh 这边不存在
+      - start：没拿到首行就回退 Work id，进程已退出就不空等 5 秒
+      - post：待发文本逐字从 stdin 送进已有会话，且 --session-id 用真实 id 渲染
+      - post：退出码非 0 就抛错（附 error 行说明），不把失败当成功
+      - post：退出 0 但没有 final 行也算失败（不认「写完就算成」）
+      - post：这一轮还在跑时不许追加（同一会话不能并发两轮）
+      - start：args 含 "-" 时把 prompt 写进 dsh stdin
+    timeoutSec: 60
+    file: tests/specs/plugins/executor-dsh-post.test.ts
+  - id: PLUG-UNIT-013
+    title: 飞书 webhook：notice 卡转为 interactive 卡，保留标题/时间/正文
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - feishu
+      - webhook
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/feishu-webhook.test.ts
+    assertions:
+      - 飞书 webhook：notice 卡转为 interactive 卡，保留标题/时间/正文
+      - 飞书 webhook：签名用 timestamp\\nsecret 作为 HMAC key
+    timeoutSec: 60
+    file: tests/specs/plugins/feishu-webhook.test.ts
+  - id: PLUG-INT-014
+    title: 题卡：多选时把勾选态画在按钮上（☑ / ☐）
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - question
+      - card
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/question-card.test.ts
+    assertions:
+      - 题卡：多选时把勾选态画在按钮上（☑ / ☐）
+      - 题卡：单选不画勾选框（单选点了就答完，没有「待提交」这回事）
+      - 回执卡：答完之后说清「答案已送回」和选了什么
+      - 答题后：题卡原地变回执；还有下一题就接着推一张
+      - 多选点选：原地刷新题卡的勾选态
+    timeoutSec: 60
+    file: tests/specs/plugins/question-card.test.ts
+  - id: PLUG-INT-015
+    title: "#接入：终端里自己开的 dsh 会话也能列出来，并标明忙闲"
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - console
+      - attach
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-console-attach.test.ts
+    assertions:
+      - "#接入：终端里自己开的 dsh 会话也能列出来，并标明忙闲"
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-console-attach.test.ts
+  - id: PLUG-INT-016
+    title: 开窗向导：未绑定的普通消息先问执行器
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - console
+      - open
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-console-open.test.ts
+    assertions:
+      - 开窗向导：未绑定的普通消息先问执行器
+      - 开窗向导：已绑定话题的正文不弹执行器卡（留给 session-post）
+      - 开窗向导：选执行器后列工作区，按钮带上 exec 与话题名
+      - 开窗向导：选工作区后提交 session.open，dsh 走 headless
+      - 开窗向导：claude 走 terminal 模式
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-console-open.test.ts
+  - id: PLUG-UNIT-017
+    title: "#resume：列出未在跑的历史会话，卡片带 sid/rebind"
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - console
+      - resume
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-console-resume.test.ts
+    assertions:
+      - "#resume：列出未在跑的历史会话，卡片带 sid/rebind"
+      - "#resume 回调：session.start 带 resumeSessionId 与 rebind"
+      - "#接入：列出在跑会话，卡片回 attach"
+      - "#接入 回调：session.attach 带话题与执行器会话"
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-console-resume.test.ts
+  - id: PLUG-INT-018
+    title: 来源白名单：钉钉群的普通消息不进开窗向导，一张卡都不发
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - console
+      - sources
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-console-sources.test.ts
+    assertions:
+      - 来源白名单：钉钉群的普通消息不进开窗向导，一张卡都不发
+      - 来源白名单：#status 从钉钉来也不回（会话就绑在这条钉钉话题上也不回）
+      - "来源白名单：钉钉来的 #new 不关窗口、不回话"
+      - 飞书来源照旧：普通消息先发「选执行器」卡
+      - 白名单默认只认飞书来源，且是按 source id 判断（可配置、不是写死渠道）
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-console-sources.test.ts
+  - id: PLUG-INT-019
+    title: 控制台只读片：#status 命中已绑定会话，回一行状态
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - console
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-console.test.ts
+    assertions:
+      - 控制台只读片：#status 命中已绑定会话，回一行状态
+      - 控制台只读片：未绑定话题不回
+      - 控制台只读片：已绑定话题的非命令不动作
+      - 控制台写库片：#new 关窗口并回文案，不停执行器
+      - 控制台只读片：题卡事件读题并回显
+      - 控制台只读片：授权请求回显工具与入参
+      - 控制台写库片：卡片选择题回写答案
+      - "控制台： #help 回帮助文本一次"
+      - "控制台： #pin 提交置顶动作"
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-console.test.ts
+  - id: PLUG-INT-020
+    title: summarize：按 kind 计数、空窗有兜底、顺序稳定
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - digest
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-digest.test.ts
+    assertions:
+      - summarize：按 kind 计数、空窗有兜底、顺序稳定
+      - "#日报：只统计窗口内事件"
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-digest.test.ts
+  - id: PLUG-INT-021
+    title: 派工出口：distribution dispatch → task.open → 会话 → 一轮结束回执
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - dispatch
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-dispatch.test.ts
+    assertions:
+      - 派工出口：distribution dispatch → task.open → 会话 → 一轮结束回执
+      - 派工出口：分发目标不含 dispatch 不派工
+      - 派工场景：别的工作区的会话结束不回执
+      - 派工出口：建议档给反馈人回一条建议
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-dispatch.test.ts
+  - id: PLUG-UNIT-022
+    title: "#待办：读快照并列出待办"
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - doc
+      - todos
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-doc-todos.test.ts
+    assertions:
+      - "#待办：读快照并列出待办"
+      - "#认领：认领第一条并写回，带 revision"
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-doc-todos.test.ts
+  - id: PLUG-INT-023
+    title: 飞书待办能力：解析、认领冲突、拆分
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - feishu
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-feishu.test.ts
+    assertions:
+      - 飞书待办能力：解析、认领冲突、拆分
+      - feishu.read-doc：非 0 退出码直接失败
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-feishu.test.ts
+  - id: PLUG-INT-024
+    title: 重点私聊：窗口等你回答 → 私聊一张卡，不发到群里
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - focus
+      - dm
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-focus-dm.test.ts
+    assertions:
+      - 重点私聊：窗口等你回答 → 私聊一张卡，不发到群里
+      - 重点私聊：同一窗口同一类在去重桶内只发一条
+      - 重点私聊：跑完的总结默认不发（避免多窗口刷屏），开了才发
+      - 重点私聊：没配 dmChatId 就完全静默（不改群，也不报错）
+      - 重点私聊：两个窗口同时找你 → 合成一条，而不是刷两条
+      - 重点私聊：单窗口不聚合，仍是一张单卡（标题带窗口名）
+      - 重点私聊：填了 dmUserId 就按 open_id 直发，不需要 p2p 会话 id
+      - 重点私聊：dmUserId 与 dmChatId 都填时，按人优先
+      - 私聊摘要：结论在第一句收口，要点分行，不把句子截断
+      - 私聊标题：只放窗口名，过长截断（状态用 ✅ 和卡片颜色表达）
+      - 分析回执：回复体是 JSON 时渲染成卡片，不再原样贴 JSON
+      - 分析回执：只有 summary 的旧格式也走卡片，且不急的用灰卡
+    timeoutSec: 60
+    notes: 另有 1 条断言见用例文件
+    file: tests/specs/plugins/scenario-focus-dm.test.ts
+  - id: PLUG-UNIT-025
+    title: 话题投递：按 thread 找到活会话就 session.post
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - session
+      - post
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-session-post.test.ts
+    assertions:
+      - 话题投递：按 thread 找到活会话就 session.post
+      - 话题投递：thread 没有时按 root 回退
+      - 话题投递：命令、停掉的会话、无会话都不投
+      - 话题投递：默认 sources 认的是真实 source id（source-feishu-im），不是渠道名
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-session-post.test.ts
+  - id: PLUG-INT-026
+    title: 控制台写库片：#stop 提交 session.stop 并停会话
+    layer: integration
+    priority: P1
+    tags:
+      - plugins
+      - scenario
+      - stop
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/scenario-stop.test.ts
+    assertions:
+      - 控制台写库片：#stop 提交 session.stop 并停会话
+    timeoutSec: 60
+    file: tests/specs/plugins/scenario-stop.test.ts
+  - id: PLUG-UNIT-027
+    title: 回执正文：保留换行与列表，只做长度保护
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - session
+      - result
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/session-result.test.ts
+    assertions:
+      - 回执正文：保留换行与列表，只做长度保护
+      - 飞书结果回执：发普通消息（不是 80 字卡片），并回到原话题
+    timeoutSec: 60
+    file: tests/specs/plugins/session-result.test.ts
+  - id: PLUG-UNIT-028
+    title: 卡片事件源 v2：归一后发 card.action，带稳定 id 与 subject
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - source
+      - card
+      - v2
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/source-card-v2.test.ts
+    assertions:
+      - 卡片事件源 v2：归一后发 card.action，带稳定 id 与 subject
+      - 卡片事件源 v2：非法载荷不发事件
+    timeoutSec: 60
+    file: tests/specs/plugins/source-card-v2.test.ts
+  - id: PLUG-UNIT-029
+    title: terminal：cscript 参数带 sessionId/cwd，等到 SessionStart 注册才返回
+    layer: unit
+    priority: P1
+    tags:
+      - plugins
+      - terminal
+      - launcher
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugins/terminal-launcher.test.ts
+    assertions:
+      - terminal：cscript 参数带 sessionId/cwd，等到 SessionStart 注册才返回
+      - terminal：等不到注册就失败，不假装 opened
+    timeoutSec: 60
+    file: tests/specs/plugins/terminal-launcher.test.ts

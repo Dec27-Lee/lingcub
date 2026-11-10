@@ -37,6 +37,12 @@ export interface MessageAnalysis {
   /** live=新消息；backfill=受控补分析，分发端默认不落副作用。 */
   origin?: 'live' | 'backfill'
   summary: string
+  /** 关键事实 2～3 条（谁、数字、期限）；模型没给就空着。 */
+  points?: string[]
+  /** 需要读者做什么；"无" 表示不需要介入。 */
+  need?: string
+  /** 与同会话此前消息的关系：新话题 / 在推进 / 重复 / 承诺未兑现… */
+  context?: string
   urgency?: 'low' | 'normal' | 'high'
   entities?: string[]
   contextVia?: 'event-store' | 'source-history'
@@ -221,11 +227,6 @@ export type Action =
     }
   /** 改一张已经存在的卡（比如把上一轮的状态卡改成灰的「已结束」） */
   | { kind: 'card_patch'; chatId: string; messageId: string; card: unknown }
-  /**
-   * 收掉这个窗口的状态卡：改成灰的「上一轮的状态」、撤掉置顶、并从 cards 表删掉。
-   * 一轮结束后状态卡就没用了，留着只会让话题里那一条一直占着置顶；新的一轮会另起一张。
-   */
-  | { kind: 'card_retire'; sessionId: string }
   /** 停掉这个窗口（执行器 stop + 会话置 stopped）；keepExecutor 只关窗口不停执行器 */
   | { kind: 'stop_session'; sessionId: string; keepExecutor?: boolean }
   /** 把会话改绑到另一个执行器会话（#resume 选中后） */

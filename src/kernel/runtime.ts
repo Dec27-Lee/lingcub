@@ -27,8 +27,11 @@ import { HotCapabilityManager } from './plugin-v2/hot.ts'
 import { startHookServer, type HookPayload } from './hook-server.ts'
 import { createHookHandlers } from './hook-handlers.ts'
 import { runCleanup } from './cleanup.ts'
+import { setSpawnRecorder } from '../plugin-kit/internal-claude.ts'
+import { defaultSpawnDirs, purgeSpawnFiles } from '../plugin-kit/internal-session-files.ts'
 import { buildHookDecision, buildPermissionCard, buildPermissionDecision, waitForAnswer, buildQuestionCard, renderQuestion } from './questions.ts'
-import { isPresent } from './presence.ts'
+import { isPresent, presencePath } from './presence.ts'
+import { startPresenceSampler } from '../plugin-kit/presence-sampler.ts'
 import type { PendingQuestion } from './store.ts'
 import { dedupeKey, eventId } from './ids.ts'
 import type { Ruleset } from '../routing/rules.ts'
@@ -163,6 +166,13 @@ function cleanupOnce(bundle: Bundle, root: string, log: Log): void {
     const ev = bundle.eventLog.prune(bundle.config.bus.ttlDays * 86_400_000)
     const auditCutoff = new Date(Date.now() - bundle.config.bus.auditTtlDays * 86_400_000).toISOString()
     const calls = bundle.store.pruneCapabilityCalls(auditCutoff)
+    // 我们自己发起的一次性会话：按表里的 id 删转录（分析/分类每次都在磁盘上留一个文件）
+    const spawnCutoff = new Date(Date.now() - cfg.spawnTtlDays * 86_400_000).toISOString()
+    const todo = bundle.store.listSpawnsToPurge(spawnCutoff)
+    const purge = purgeSpawnFiles(todo, defaultSpawnDirs())
+    for (const sid of [...purge.removed, ...purge.missing]) bundle.store.markSpawnPurged(sid)
+    if (purge.removed.length) log('info', `清理：一次性会话转录 ${purge.removed.length} 个`)
+    if (purge.failed.length) log('warn', `清理：${purge.failed.length} 个一次性会话没删掉（下次再试）：${purge.failed[0]?.error ?? ''}`)
     if (r.images || r.logs || map || q || ev.events || ev.deliveries || calls) {
       log(
         'info',
@@ -316,6 +326,14 @@ export async function runRuntime(opts: RuntimeOptions): Promise<void> {
     throw e
   }
   const { store, outbox, pipeline, projects, ports, eventLog } = bundle
+  // 平台自己发起的一次性调用（分析/分类）也把会话 id 记下来：清理按 id 删，不靠内容匹配
+  setSpawnRecorder((rec) => {
+    try {
+      store.recordSpawn(rec.sessionId, rec.executor, rec.purpose)
+    } catch {
+      /* 记账失败不该拖垮这次调用 */
+    }
+  })
 
   const controller = new AbortController()
   if (opts.signal) {
@@ -388,9 +406,26 @@ export async function runRuntime(opts: RuntimeOptions): Promise<void> {
     if (!sid || !questions.length) return {}
     const session = store.findSessionByExecutor(sid)
     if (!session) return {} // 不是本进程起的窗口：不代答，让终端弹窗照常出现
-    // 人在电脑前就让终端弹窗照常出现，别把人晾在飞书上
+    // 人在电脑前就让终端弹窗照常出现，别把人晾在飞书上；
+    // 但飞书仍推一张**不带按钮**的提醒卡，让手机那头知道「有个窗口在等你」（参考项目 noticeOnly 同款）。
     if (isPresent(root)) {
-      log('debug', '人在电脑前，选择题留给终端')
+      const first = questions[0]
+      outbox.enqueue(
+        {
+          kind: 'card_send',
+          sessionId: session.id,
+          chatId: session.chatId,
+          replyTo: session.rootMessageId ?? session.threadId,
+          card: {
+            kind: 'here-notice',
+            noticeKind: 'question',
+            question: first ? `${first.header ? `${first.header}：` : ''}${first.question}` : '',
+            workspace: session.workspace,
+          },
+        },
+        dedupeKey(`here-${sid}`, 'ask-notice'),
+      )
+      log('info', `人在电脑前，选择题留给终端（飞书只推提醒卡）：${session.id}`)
       return {}
     }
 
@@ -463,6 +498,25 @@ export async function runRuntime(opts: RuntimeOptions): Promise<void> {
     }
     const input = { tool_name: p.tool_name as string | undefined, tool_input: p.tool_input }
     const now = Date.now()
+    if (isPresent(root)) {
+      outbox.enqueue(
+        {
+          kind: 'card_send',
+          sessionId: session.id,
+          chatId: session.chatId,
+          replyTo: session.rootMessageId ?? session.threadId,
+          card: {
+            kind: 'here-notice',
+            noticeKind: 'permission',
+            toolName: input.tool_name,
+            workspace: session.workspace,
+          },
+        },
+        dedupeKey(`here-${sid}`, 'perm-notice'),
+      )
+      log('info', `人在电脑前，工具授权留给终端（飞书只推提醒卡）：${session.id}`)
+      return {}
+    }
     const id = `perm-${sid}-${now}`
     store.insertQuestion({
       id,
@@ -531,6 +585,13 @@ export async function runRuntime(opts: RuntimeOptions): Promise<void> {
   })
   log('info', `钩子端点已就绪：127.0.0.1:${hooks.port}`)
 
+  // 在场采样：代答类钩子要判断「人是不是就在电脑前」，决定拦不拦。
+  // 只支持 Windows（GetLastInputInfo）；其它平台不启动，内核读不到采样文件就按「不在」处理。
+  const presence =
+    process.platform === 'win32'
+      ? startPresenceSampler({ file: presencePath(root), log: (level, msg) => log(level, msg) })
+      : { stop: async () => {} }
+
   let lastCleanup = 0 // 首轮就会跑一次
   let lastAdopt = 0 // 首轮就会扫一次本地窗口
   let lastOverlay = overlayStamp(root)
@@ -586,7 +647,7 @@ export async function runRuntime(opts: RuntimeOptions): Promise<void> {
         }
         const reaped = await pipeline.reapDeadSessions()
         if (reaped) log('info', `关窗回收：${reaped} 个会话标记 dead`)
-        const pins = await pipeline.reconcilePins()
+        await pipeline.reconcilePins()
         const settled = await pipeline.collect()
         // 启动时一次，之后每小时一次；顺手把「已结束很久的会话」也标成 stopped
         if (Date.now() - lastCleanup >= 3_600_000) {
@@ -611,6 +672,7 @@ export async function runRuntime(opts: RuntimeOptions): Promise<void> {
       await sleep(tickMs, signal)
     }
   } finally {
+    await presence.stop()
     await sources.stop()
     process.removeListener('SIGINT', shutdown)
     process.removeListener('SIGTERM', shutdown)

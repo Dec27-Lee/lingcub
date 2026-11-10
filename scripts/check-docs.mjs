@@ -38,7 +38,18 @@ const ID_RE = /^(\d{8}-[a-z0-9]+-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8})$/
 const FILE_ID_RE = /^(\d{8}-[a-z0-9]+-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8})-/
 
 // 1 链接可达
-for (const f of ['README.md', 'AGENTS.md', 'CHANGELOG.md', 'docs/README.md', 'docs/tasks/README.md', 'docs/tasks/INDEX.md']) {
+for (const f of [
+  'README.md',
+  'AGENTS.md',
+  'CHANGELOG.md',
+  'docs/README.md',
+  'docs/design/README.md',
+  'docs/runtime/README.md',
+  'docs/platform/README.md',
+  'docs/reference/README.md',
+  'docs/tasks/README.md',
+  'docs/tasks/INDEX.md',
+]) {
   if (!existsSync(join(ROOT, f))) errs.push(`缺少 ${f}`)
   else links(join(ROOT, f))
 }
@@ -88,6 +99,26 @@ if (agents.includes('23456789ABCDEFGHJKLMNPQRSTUVWXYZ')) errs.push('AGENTS.md �
 
 // 5 台账与任务文档一一对应
 if (rows !== docs.length) errs.push(`INDEX 有 ${rows} 行，任务文档有 ${docs.length} 份，应一一对应`)
+
+// 6 docs 结构：根目录只留索引，其余按组归档；文件名不用数字编号
+const docsRoot = join(ROOT, 'docs')
+const stray = readdirSync(docsRoot, { withFileTypes: true })
+  .filter((e) => e.isFile() && e.name.endsWith('.md') && e.name !== 'README.md')
+  .map((e) => e.name)
+if (stray.length) {
+  errs.push(`docs/ 根目录只允许 README.md，其余文档要归到分组目录（design/runtime/platform/reference）：${stray.join('、')}`)
+}
+const GROUPS = ['design', 'runtime', 'platform', 'reference']
+for (const g of GROUPS) {
+  const dir = join(docsRoot, g)
+  if (!existsSync(dir)) {
+    errs.push(`docs/${g}/ 缺失（分组目录是文档结构的一部分）`)
+    continue
+  }
+  for (const f of readdirSync(dir)) {
+    if (f.endsWith('.md') && /^\d/.test(f)) errs.push(`docs/${g}/${f}: 文件名不要用数字编号，用语义命名`)
+  }
+}
 
 if (errs.length) {
   console.error(`✖ 文档自检失败（${errs.length} 处）`)

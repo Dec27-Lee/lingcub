@@ -1,0 +1,823 @@
+# kernel 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: kernel
+domain: kernel
+scenarios:
+  - id: KERNEL-INT-001
+    title: 效果由能力名家族决定：副作用不能声明成 none，插件不能用内核前缀
+    layer: integration
+    priority: P0
+    tags:
+      - kernel
+      - capabilities
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/capabilities.test.ts
+    assertions:
+      - 效果由能力名家族决定：副作用不能声明成 none，插件不能用内核前缀
+      - 能力重名直接失败
+      - call：同步能力校验输入输出并记审计；副作用能力拒绝 call
+      - 输出不合法也算失败并记审计
+      - submit：无发件箱拒绝；有发件箱时收据幂等且只入队一次
+      - check：needs 缺失要报，wants 缺失只降级
+    timeoutSec: 60
+    file: tests/specs/kernel/capabilities.test.ts
+  - id: KERNEL-INT-002
+    title: 九分支能力化：提交后的 Action 与旧 createDeliver 分支一一对应
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - capability
+      - effects
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/capability-effects.test.ts
+    assertions:
+      - 九分支能力化：提交后的 Action 与旧 createDeliver 分支一一对应
+    timeoutSec: 60
+    file: tests/specs/kernel/capability-effects.test.ts
+  - id: KERNEL-INT-003
+    title: 状态卡：第一次是建卡，记下 message_id
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - cards
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/cards.test.ts
+    assertions:
+      - 状态卡：第一次是建卡，记下 message_id
+      - 状态卡：内容没变就不重发（不该刷屏）
+      - 状态卡：内容变了就原地改同一张卡
+      - 状态卡：频道不支持卡片时明确失败，不假装成功
+      - 卡片渲染：状态决定颜色与标题，一行一个元素（参考项目 status 卡）
+      - 卡片渲染：超长「你说」折成折叠面板，「它说」用灰字
+      - 状态卡：建卡没拿到消息 id 就明确失败，不记成已建
+      - 图片：投递前先下载，再把本地路径补进正文
+      - 图片：没有 image 字段就不下载
+      - 置顶：建卡后按配置置顶，置顶失败不影响发卡
+      - 换卡：旧卡先取消置顶（否则记录一删就永远撤不掉）
+      - 刷新状态卡时，会话真名（aiTitle）会替换掉「用户第一句话当标题」
+    timeoutSec: 60
+    notes: 另有 9 条断言见用例文件
+    file: tests/specs/kernel/cards.test.ts
+  - id: KERNEL-INT-004
+    title: 图片清理：按天/按会话的目录过期就整目录删，没过期的一个不动
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - cleanup
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/cleanup.test.ts
+    assertions:
+      - 图片清理：按天/按会话的目录过期就整目录删，没过期的一个不动
+      - 图片清理：目录不存在也不报错
+      - 日志修剪：超过上限只留尾部一半
+      - 清理总入口：图片与日志一起跑，互不影响
+      - 残留提问：超时未答的清掉，答过的留着
+      - 消息映射：超过 TTL 的清掉，引用旧消息就退化成别的路由
+      - 图片清理：按目录名（日期）判过期，不按 mtime——否则活跃目录里的旧图永远删不掉
+    timeoutSec: 60
+    file: tests/specs/kernel/cleanup.test.ts
+  - id: KERNEL-UNIT-005
+    title: 配置页：控制台开窗与重点私聊的键都能在页面上改
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - config
+      - console
+      - keys
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/config-console-keys.test.ts
+    assertions:
+      - 配置页：控制台开窗与重点私聊的键都能在页面上改
+      - 配置页：把开窗与私聊写进覆盖层后能读回来（校验通过）
+      - 配置页：scenarios 段是 passthrough，类型由插件自己的 zod 把关（写错值会在装配时被拒）
+    timeoutSec: 60
+    file: tests/specs/kernel/config-console-keys.test.ts
+  - id: KERNEL-UNIT-006
+    title: 深合并：对象递归，数组整体替换
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - config
+      - overlay
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/config-overlay.test.ts
+    assertions:
+      - 深合并：对象递归，数组整体替换
+      - 没有覆盖层时读基线；有覆盖层时覆盖层赢
+      - 覆盖层只改一个字段，其余基线保持不变
+      - 覆盖层不合法时拒绝写盘，旧覆盖层保持不变
+      - 覆盖层合并后仍不合法时也拒绝（多个字段互相影响）
+      - 多次保存是累加的，不是互相覆盖
+    timeoutSec: 60
+    file: tests/specs/kernel/config-overlay.test.ts
+  - id: KERNEL-UNIT-007
+    title: 配置页字段：从配置本身推出来，不用改代码就能出现新键
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - config
+      - schema
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/config-schema.test.ts
+    assertions:
+      - 配置页字段：从配置本身推出来，不用改代码就能出现新键
+      - 配置页字段：执行器参数与命令行不上页面（平台事实，不给改）
+      - 配置页字段：类型与中文名对得上，只读项不算可改
+      - 配置页字段：配置里没出现的已知键也补上（默认值被省略时页面照样认得）
+    timeoutSec: 60
+    file: tests/specs/kernel/config-schema.test.ts
+  - id: KERNEL-UNIT-008
+    title: allowRoots 命中：子目录通过
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - config
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/config.test.ts
+    assertions:
+      - allowRoots 命中：子目录通过
+      - allowRoots 未命中：拒绝
+      - 前缀不能靠字符串包含绕过：E:\\Develop_E\\ttx 不在 E:\\Develop_E\\tt 内
+      - allowRoots 为空时一律拒绝（fail-closed）
+      - workspace id 重复时报错
+    timeoutSec: 60
+    file: tests/specs/kernel/config.test.ts
+  - id: KERNEL-UNIT-009
+    title: 信封：短、稳定、写清「这是用户本人打的」
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - envelope
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/envelope.test.ts
+    assertions:
+      - 信封：短、稳定、写清「这是用户本人打的」
+      - 信封：正文原样保留（换行、多段、图片标记都不动）
+      - 信封：空正文也不吞掉结构
+    timeoutSec: 60
+    file: tests/specs/kernel/envelope.test.ts
+  - id: KERNEL-INT-010
+    title: 消息事件与事件史同事务写入，重复投递不追加
+    layer: integration
+    priority: P0
+    tags:
+      - kernel
+      - event
+      - log
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/event-log.test.ts
+    assertions:
+      - 消息事件与事件史同事务写入，重复投递不追加
+      - 领域事件同 id 只落一次
+      - 新订阅默认不回放历史；since=beginning 才回放
+      - 游标持久化：关库重开后只投剩下的
+      - 全局串行：前一个订阅处理完才轮到下一个
+      - 失败退避：未到点不重试，到点后重试成功
+      - 死信越过游标：毒事件不卡后续，死信行保留
+      - handler 超时按失败处理，不冻住整个 tick
+      - 死信越过游标是持久化的：重开库不重投毒事件
+      - 滞后超限冻结订阅；积压超上限跳过不补投
+      - prune：只删游标前且无未决投递的事件；死信事件保留
+      - 崩溃恢复：dispatched 回到 pending 且 attempts 不归零
+    timeoutSec: 60
+    file: tests/specs/kernel/event-log.test.ts
+  - id: KERNEL-UNIT-011
+    title: 选择题事件：kind/自然键/题目都带上
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - hook
+      - events
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/hook-events.test.ts
+    assertions:
+      - 选择题事件：kind/自然键/题目都带上
+      - 授权事件：kind/自然键/工具名都带上
+    timeoutSec: 60
+    file: tests/specs/kernel/hook-events.test.ts
+  - id: KERNEL-E2E-012
+    title: 钩子端点：无令牌 403，有令牌才回调
+    layer: e2e
+    priority: P1
+    tags:
+      - kernel
+      - hooks
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/hooks.test.ts
+    assertions:
+      - 钩子端点：无令牌 403，有令牌才回调
+      - 钩子 CLI：把 stdin 转给常驻端点（真进程）
+      - 没有常驻端点时钩子静默成功（不打断 claude）
+      - 按执行器会话 id 反查会话（hook 只带 claude 的 session_id）
+      - 结果回传：只有本进程起的会话才回，回的是它自己的话题
+      - 结果回传：空输出给一句话，长输出不再被提前截断（交给分段发）
+      - 钩子端点 /ask：挂起等答案，答完返回决策
+      - 钩子端点 /ask：没人答就返回空对象（终端弹窗照常出现）
+      - 提醒卡：标题按通知类型分派，同类同文案 10 分钟内只推一次
+      - 长回复分段：按段落切开，段标题带 (i/总)，第一段带头部
+      - 长回复分段：通知发成多条，第一段带目录头，后续带 (i/总)
+      - 会话开头注入约定：只有本进程起的会话才注入
+    timeoutSec: 120
+    notes: 另有 6 条断言见用例文件
+    file: tests/specs/kernel/hooks.test.ts
+  - id: KERNEL-INT-013
+    title: hot 能力：启用即注册，停用即注销
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - hot
+      - capability
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/hot-capability.test.ts
+    assertions:
+      - hot 能力：启用即注册，停用即注销
+      - hot 能力：setup 抛错时回收已注册能力
+      - hot 加载冲突：不删除别的提供者的同名能力
+    timeoutSec: 60
+    file: tests/specs/kernel/hot-capability.test.ts
+  - id: KERNEL-UNIT-014
+    title: eventId 对同一输入稳定（幂等的基础）
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - ids
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/ids.test.ts
+    assertions:
+      - eventId 对同一输入稳定（幂等的基础）
+      - 不同 source 的同名 externalId 不碰撞
+      - 分隔符不可伪造：拼接歧义不产生同 id
+      - id 定长 16
+      - workId 与 dedupeKey 域分离
+    timeoutSec: 60
+    file: tests/specs/kernel/ids.test.ts
+  - id: KERNEL-UNIT-015
+    title: 纯图消息的 JSON 正文转成统一标记
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - images
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/images.test.ts
+    assertions:
+      - 纯图消息的 JSON 正文转成统一标记
+      - 一条消息里多张图：两种标记写法都要认，且去重保序
+      - 下载完原地替换标记：成功给路径，失败给占位，不丢图也不重复发正文
+      - "老写法的图也能替换：`[Image: key]` 不是 markdown 图片语法"
+      - 同一张图在正文里出现多次，一起换掉
+    timeoutSec: 60
+    file: tests/specs/kernel/images.test.ts
+  - id: KERNEL-INT-016
+    title: judge.classify：规则优先，命中即返回 Intent
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - capabilities
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/kernel-capabilities.test.ts
+    assertions:
+      - judge.classify：规则优先，命中即返回 Intent
+      - judge.classify：规则不中走分类器，低置信度返回 null
+      - workspace.list：合并两个执行器、按 root 去重、按最近活跃排序，可按执行器过滤
+      - state.session.route：按话题找会话，dead/未绑定返回 null
+      - event.query：按时间窗与 kind 过滤
+      - event.query：只按时间窗过滤（不靠 kind 掩盖）
+      - state.question.get：有则返回，无则 null
+      - state.workstation.snapshot：汇总会话/工作/发件箱计数
+      - state.session.list：按 chat 列历史会话，limit 生效
+      - state.session.live：聚合执行器活会话，不支持时为空
+      - state.session.history：聚合执行器历史会话，按 cwd/executor 过滤
+      - state.workspace.get：项目 id 换根路径，未知返回 null
+    timeoutSec: 60
+    notes: 另有 3 条断言见用例文件
+    file: tests/specs/kernel/kernel-capabilities.test.ts
+  - id: KERNEL-INT-017
+    title: remove：注销能力后 call 报未知能力，重复 remove 返回 false
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - lifecycle
+      - primitives
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/lifecycle-primitives.test.ts
+    assertions:
+      - remove：注销能力后 call 报未知能力，重复 remove 返回 false
+      - unsubscribe：删订阅与游标，返回条数；重复调用为 0；事件史与已有投递不动
+      - unsubscribe：同一 subscriber 的多类订阅一次删净
+    timeoutSec: 60
+    file: tests/specs/kernel/lifecycle-primitives.test.ts
+  - id: KERNEL-UNIT-018
+    title: 通知卡：📁/🕐/📦 各占一个元素（挤在一个里会被飞书折成一段）
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - notice
+      - card
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/notice-card.test.ts
+    assertions:
+      - 通知卡：📁/🕐/📦 各占一个元素（挤在一个里会被飞书折成一段）
+      - 通知卡：「你在终端里说」短的摆出来，长的折起来，截断要说清原文多少字
+      - 通知卡：分段时后续段标题带 (i/总)，且不再重复头三行
+      - 通知卡：短句阈值就是 180（多一个字就折叠）
+    timeoutSec: 60
+    file: tests/specs/kernel/notice-card.test.ts
+  - id: KERNEL-INT-019
+    title: 同一 dedupeKey 只投递一次
+    layer: integration
+    priority: P0
+    tags:
+      - kernel
+      - outbox
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/outbox.test.ts
+    assertions:
+      - 同一 dedupeKey 只投递一次
+      - 投递失败：前两次回 pending 重试，第三次转 dead 并告警
+      - 单条失败不影响同批次其他条目
+      - 崩溃恢复：dispatched 未完成转 unknown，不自动重投
+    timeoutSec: 60
+    file: tests/specs/kernel/outbox.test.ts
+  - id: KERNEL-INT-020
+    title: 假端到端：Event → 假分类器 → 假执行器开工 → 收到回执（不触网）
+    layer: integration
+    priority: P0
+    tags:
+      - kernel
+      - pipeline
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/pipeline.test.ts
+    assertions:
+      - 假端到端：Event → 假分类器 → 假执行器开工 → 收到回执（不触网）
+      - 同一条消息重复投递只落一次库（不重复开工）
+      - observe 档只记录：不派工、不起会话
+      - suggest 档只发建议，不起会话
+      - 没有分类器且规则未命中：只记录，不派工
+      - 置信度低于门槛：判断落库但只记录，不派工
+      - 工作区不在允许根内：投递失败并重试，不静默吞掉
+      - status 命令交给场景时 Pipeline 不再处理
+      - stop 命令交给场景时 Pipeline 不再处理
+      - new 命令交给场景时 Pipeline 不再处理
+      - 消息总开关：bus 模式旧 Pipeline 只落库不路由
+      - collect：event 开窗的 Work 不由旧 Pipeline 轮询
+    timeoutSec: 60
+    notes: 另有 2 条断言见用例文件
+    file: tests/specs/kernel/pipeline.test.ts
+  - id: KERNEL-UNIT-021
+    title: 重扫安装台账：v1/v2 合并、新装的下一轮就可见（不缓存）、目录不存在返回空
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - plugin
+      - admin
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/plugin-admin.test.ts
+    assertions:
+      - 重扫安装台账：v1/v2 合并、新装的下一轮就可见（不缓存）、目录不存在返回空
+      - 开关：v2 纯能力插件写 plugins.<id>，按声明不要求重启；关闭同理
+      - 开关：已有配置段沿用自己的键，不造第二份引用；这些插件要求重启
+      - 开关拒绝：未安装、executor 缺必填配置、值非法校验不过，都只返回 applied=false
+    timeoutSec: 60
+    file: tests/specs/kernel/plugin-admin.test.ts
+  - id: KERNEL-UNIT-022
+    title: 插件边界：只允许 domain、plugin-kit、自身目录和 npm 包
+    layer: unit
+    priority: P0
+    tags:
+      - kernel
+      - plugin
+      - boundaries
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/plugin-boundaries.test.ts
+    assertions:
+      - 插件边界：只允许 domain、plugin-kit、自身目录和 npm 包
+    timeoutSec: 60
+    file: tests/specs/kernel/plugin-boundaries.test.ts
+  - id: KERNEL-UNIT-023
+    title: 安装台账：停用/未配置的插件也在列，启用状态独立
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - plugin
+      - catalog
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/plugin-catalog.test.ts
+    assertions:
+      - 安装台账：停用/未配置的插件也在列，启用状态独立
+      - 安装台账：已启用但控制权未就绪的插件带 gate
+    timeoutSec: 60
+    file: tests/specs/kernel/plugin-catalog.test.ts
+  - id: KERNEL-INT-024
+    title: 清单校验：合法清单通过；id/效果/依赖/未知键逐条报错
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - plugin
+      - v2
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/plugin-v2.test.ts
+    assertions:
+      - 清单校验：合法清单通过；id/效果/依赖/未知键逐条报错
+      - 配置解析：v2 对象 schema 强制 strict，默认值生效
+      - 能力图：needs 决定顺序，缺必需能力与环都报错，wants 不建边
+      - 装配：setup 按依赖顺序、start 能调用依赖能力、stop 逆序
+      - 装配：缺必需能力失败；禁用插件跳过；缺可选能力只降级
+      - 发现：v2 目录被 v2 发现器收下，v1 发现器跳过；kind+v2 直接失败
+      - 配置别名：v2 段优先于旧段，enabled 透传，v2-only 配置能过 schema
+      - 能力图：wants 内核能力不算缺失
+      - 清单：activation=hot 只允许无事件订阅的纯 capability
+    timeoutSec: 60
+    file: tests/specs/kernel/plugin-v2.test.ts
+  - id: KERNEL-INT-025
+    title: auto：提交入发件箱，投递成功回填收据并追加 effect.done
+    layer: integration
+    priority: P0
+    tags:
+      - kernel
+      - policy
+      - receipts
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/policy-receipts.test.ts
+    assertions:
+      - auto：提交入发件箱，投递成功回填收据并追加 effect.done
+      - 同一 opKey 重复提交：返回同一收据，不重复入队
+      - observe：只记 would-do，不发消息
+      - suggest：通知类直接放行，不落确认
+      - suggest：业务副作用仍停在 pending
+      - 投递死信：收据转 failed 并追加 effect.failed
+      - suggest：业务副作用仍落确认并回调 confirmation.requested
+    timeoutSec: 60
+    file: tests/specs/kernel/policy-receipts.test.ts
+  - id: KERNEL-UNIT-026
+    title: 在场：3 分钟内算在，超过算走（阈值对齐参考项目 awayIdleSeconds=180）
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - presence
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/presence.test.ts
+    assertions:
+      - 在场：3 分钟内算在，超过算走（阈值对齐参考项目 awayIdleSeconds=180）
+      - 在场：锁屏一律算离开，采样过期算不知道（当离开）
+    timeoutSec: 60
+    file: tests/specs/kernel/presence.test.ts
+  - id: KERNEL-INT-027
+    title: 作答后：等待循环返回 answered，钩子决策已经是 hookSpecificOutput 形状
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - questions
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/questions.test.ts
+    assertions:
+      - 作答后：等待循环返回 answered，钩子决策已经是 hookSpecificOutput 形状
+      - 选择题：回序号解析成选项文案，key 是问题原文
+      - 选择题：多选才合并，单选只取第一个
+      - 选择题：多题时按顺序答，已答的题不再重复问
+      - 选择题：钩子决策包在 hookSpecificOutput 里（顶层平铺 Claude 不认）
+      - 有题在等答案时，话题里的回复是答案，不会投进窗口
+      - 没有待答题时，话题消息照常投给窗口
+      - 工具授权：文字只认整行 1/2（自由文字分不清是回答还是新指令）
+      - 工具授权：决策形状按官方契约，allow 必须原样回传 tool_input
+      - 工具授权：话题里的 1/2 变成决策，不会投给窗口
+      - 工具授权：回 2 就是拒绝（不能一律放行）
+      - 选择题卡片：点选项直接作答；点失效的卡按原因回不同文案
+    timeoutSec: 60
+    notes: 另有 5 条断言见用例文件
+    file: tests/specs/kernel/questions.test.ts
+  - id: KERNEL-INT-028
+    title: session.answer：记录答案并投给执行器
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - session
+      - answer
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/session-answer.test.ts
+    assertions:
+      - session.answer：记录答案并投给执行器
+    timeoutSec: 60
+    file: tests/specs/kernel/session-answer.test.ts
+  - id: KERNEL-INT-029
+    title: session.close：只关窗口，不停执行器
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - session
+      - close
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/session-close.test.ts
+    assertions:
+      - session.close：只关窗口，不停执行器
+    timeoutSec: 60
+    file: tests/specs/kernel/session-close.test.ts
+  - id: KERNEL-INT-030
+    title: session.open：先落请求与事件，执行器 opened 后建会话并发 ready
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - session
+      - open
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/session-open.test.ts
+    assertions:
+      - session.open：先落请求与事件，执行器 opened 后建会话并发 ready
+      - session.open：执行器 failed 时工作项失败、请求保持 failed
+      - task.open via=event：落 event Work 并生成 session.open.requested
+      - task.open via=event → 执行器 opened → session.ready 全链路
+      - executor-claude-v2：清单 v2 可装配并订阅 session.open.requested
+      - session.turn.ended：轮次持久化，重启后可查
+    timeoutSec: 60
+    file: tests/specs/kernel/session-open.test.ts
+  - id: KERNEL-INT-031
+    title: session.ready：场景发 ready 卡，内核不再拼卡片
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - session
+      - ready
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/session-ready.test.ts
+    assertions:
+      - session.ready：场景发 ready 卡，内核不再拼卡片
+    timeoutSec: 60
+    file: tests/specs/kernel/session-ready.test.ts
+  - id: KERNEL-INT-032
+    title: 话题路由：只记了根消息 om_ 的会话，用根消息也能命中
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - session
+      - topic
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/session-topic.test.ts
+    assertions:
+      - 话题路由：只记了根消息 om_ 的会话，用根消息也能命中
+      - 话题路由：真话题 id omt_ 命中；别的群不串
+      - 话题路由：thread 命中优先于根消息命中（同群多条会话时不乱认）
+      - 话题路由：新话题第一条消息只有 rootId 时，用 rootId 也能找回会话
+      - 会话路由：dead 会话不再接消息
+      - 执行器身份：库里存短 id、钩子给全 uuid 也要认得出（headless 结果能回来）
+      - 执行器身份：库里存全 uuid、钩子给短 id 也能认
+    timeoutSec: 60
+    file: tests/specs/kernel/session-topic.test.ts
+  - id: KERNEL-INT-033
+    title: 会话表：一个话题只绑一个会话
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - session
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/session.test.ts
+    assertions:
+      - 会话表：一个话题只绑一个会话
+      - 会话状态：touch 变 active，可置 dead；dead 不再接消息
+      - 会话路由：没有 threadId 就不路由（普通消息照常走判断）
+      - 事件记下投给了哪个会话（回放要能区分直投与判断）
+      - 话题里的消息直投会话：不产生 Intent，也不起新会话
+      - 会话不支持追加时明确失败，不静默丢弃
+      - 命名管道投递：先 auth 行，再 user 信封行
+      - 开窗：多个工作区先问，回序号后派工并绑话题
+      - 开窗：只有一个工作区就不问，直接开
+      - 开窗：序号不认就给选项重问，不误派工
+      - judge 档不走进开窗流程（默认行为不变）
+      - 开窗：已经在话题里的消息不开新窗（否则每个回复都变新窗口）
+    timeoutSec: 60
+    notes: 另有 16 条断言见用例文件
+    file: tests/specs/kernel/session.test.ts
+  - id: KERNEL-UNIT-034
+    title: 来源启动：旧 sources 段与 v2 注册端口都启动，同一插件不重复
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - source
+      - start
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/source-start.test.ts
+    assertions:
+      - 来源启动：旧 sources 段与 v2 注册端口都启动，同一插件不重复
+    timeoutSec: 60
+    file: tests/specs/kernel/source-start.test.ts
+  - id: KERNEL-INT-035
+    title: 状态卡：v2 建出来的会话（workspace 是绝对 cwd）也能出卡并回到话题
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - status
+      - card
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/status-card.test.ts
+    assertions:
+      - 状态卡：v2 建出来的会话（workspace 是绝对 cwd）也能出卡并回到话题
+      - 状态卡：内容没变不重发（刷新节流 + 发件箱去重 + 签名三层挡住）
+      - 卡片签名：秒级文案抖动不算变化（否则每 2 秒 patch 一次飞书）
+      - turn 是否还在跑：人刚说完=在跑；助手收尾=结束；工具调用没回填=在跑
+      - 状态卡签名：只有秒级文案变化时签名不变（否则每 5 秒 patch 一次飞书，把投递队列堵死）
+    timeoutSec: 60
+    file: tests/specs/kernel/status-card.test.ts
+  - id: KERNEL-INT-036
+    title: 同一条 Event 插两次只有一行（内容派生 id 幂等）
+    layer: integration
+    priority: P0
+    tags:
+      - kernel
+      - store
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/store.test.ts
+    assertions:
+      - 同一条 Event 插两次只有一行（内容派生 id 幂等）
+      - traceMessage：返回原始事件与同 id 的事件史、发件箱
+      - degradedAnalyses：只返回最新一次仍降级的消息
+      - retryDeadOutbox：只把 dead 行放回 pending
+      - countAnalysis：按状态统计最近分析事件
+      - latestAnalysis：重试后取最新一次，而不是首轮
+      - recentAnalyses：按会话取此前几条成功分析，旧→新，降级的不喂回模型
+      - countEventsWithoutAnalysis：统计早于窗口且完全无分析的消息
+      - oldEventsWithoutAnalysis：只取窗口外缺口，按时间正序
+      - outbox.eventId：按事件关联，不依赖 dedupe 字符串
+      - findEventByExternalId：按平台消息 id 找回归一事件
+      - 不同 externalId 各占一行
+    timeoutSec: 60
+    notes: 另有 6 条断言见用例文件
+    file: tests/specs/kernel/store.test.ts
+  - id: KERNEL-INT-037
+    title: task.open：落 intent/work → start_session → 会话行与收据闭环
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - task
+      - session
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/task-session.test.ts
+    assertions:
+      - task.open：落 intent/work → start_session → 会话行与收据闭环
+      - task.open：同一 opKey 只落一份 work/会话，不重复起会话
+      - task.open：observe 档只记 would-do，不起会话
+      - task.open：项目不存在 → 提交失败、收据 failed、不落 work
+      - transport.dingtalk.send：路由到提供者频道插件并回填 externalId
+      - start_session：工作区不在 allowRoots 内直接失败，不起执行器
+      - start_session：#resume 走 rebind，不新增会话行
+    timeoutSec: 60
+    file: tests/specs/kernel/task-session.test.ts
+  - id: KERNEL-UNIT-038
+    title: 反查人话：跳过系统产物与工具回执，取最后一条真正的输入
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - transcript
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/transcript.test.ts
+    assertions:
+      - 反查人话：跳过系统产物与工具回执，取最后一条真正的输入
+      - 反查人话：这一轮是飞书发起的就直接返回 null，不能往前翻到旧的终端输入
+      - 剥包装：粘贴块与贴图占位符去掉，人写的内容保留
+      - 用量：从最后一次 usage 累加 input 与两种 cache；没有 usage 返回 null
+      - 用量那一行：有进度条与百分比；取不到就空串
+      - 找到转录文件：给会话 id 就能在 projects 下命中
+      - 通知正文：目录/时间/分隔线/正文，飞书发起的不带「你在终端说」
+      - 通知正文：终端里说的话会带出来（长句截断）
+      - 状态卡内容：有转录时画完整几行（在跑时长/改了几个文件/它说/用量）
+      - 状态卡内容：在跑的时候多一行「正在用哪个工具」
+      - 状态卡内容：没有转录也能画（只有目录与结束时间），不编数
+      - 子任务：未闭合的 Agent / 后台 Bash 算「还在跑」，有 tool_result 就不算
+    timeoutSec: 60
+    notes: 另有 4 条断言见用例文件
+    file: tests/specs/kernel/transcript.test.ts
+  - id: KERNEL-UNIT-039
+    title: 控制权：开关没切到场景档就不装配，避免与旧 Pipeline 双回
+    layer: unit
+    priority: P1
+    tags:
+      - kernel
+      - v2
+      - ownership
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/v2-ownership.test.ts
+    assertions:
+      - 控制权：开关没切到场景档就不装配，避免与旧 Pipeline 双回
+      - 控制权：未启用的插件不装配也不告警
+    timeoutSec: 60
+    file: tests/specs/kernel/v2-ownership.test.ts
+  - id: KERNEL-INT-040
+    title: 工作区列表：配置里登记的仓库排第一（别把子目录顶到第一个）
+    layer: integration
+    priority: P1
+    tags:
+      - kernel
+      - workspace
+      - order
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/workspace-order.test.ts
+    assertions:
+      - 工作区列表：配置里登记的仓库排第一（别把子目录顶到第一个）
+      - 工作区列表：没有配置过时仍按最近活跃排序
+      - workspace.trust：把选中的工作区交给执行器登记信任（dsh 直通）
+    timeoutSec: 60
+    file: tests/specs/kernel/workspace-order.test.ts
+
+  - id: KERNEL-UNIT-041
+    title: 一次性会话转录导入：只认 sdk-cli 加本平台任务模板，探针/交互式/旧格式都不进清单
+    layer: unit
+    priority: P0
+    tags:
+      - kernel
+      - spawn
+      - transcripts
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/spawn-adopt.test.ts
+    assertions:
+      - 导入清单只认「sdk-cli + 本平台任务模板」：探针、交互式会话、旧格式都不进
+      - 扫描是纯读：跑完九个文件一个不少，内容也没变
+      - 目录不存在时返回空清单，不抛错
+    timeoutSec: 60
+    file: tests/specs/kernel/spawn-adopt.test.ts
+  - id: KERNEL-UNIT-042
+    title: 上下文用量那一行的分母取 claude 自己声明的窗口，不取配置常量
+    layer: unit
+    priority: P0
+    tags:
+      - kernel
+      - cards
+      - context
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/context-window.test.ts
+    assertions:
+      - 分母取 claude 自己声明的窗口，不取配置里的常量
+      - 钩子进程继承的 env 优先于 settings.json
+      - 拿不到分母就不画百分比，也不拿配置的 0 当真
+      - 配置文件显式写了才用它兜底
+      - statsLine：有分母画条，没分母只写 token 数
+    timeoutSec: 60
+    file: tests/specs/kernel/context-window.test.ts

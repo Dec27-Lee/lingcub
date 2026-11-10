@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto'
 
 import type { CardState, Session } from '../domain/types.ts'
 import { currentTurn, lastUserInput, statsLine } from './transcript.ts'
+import { resolveContextWindow } from './context-window.ts'
 
 export interface StatusInput {
   session: Session
@@ -101,7 +102,7 @@ export function buildStatusCard(a: StatusInput): CardState {
   if (turn.said) lines.push(`🤖 它说：${clip(turn.said.replace(/\s+/g, ' '), 140)}`)
   lines.push(`📁 \`${a.session.workspace}\``)
 
-  const stats = statsLine(a.transcript, a.contextWindow ?? 200_000)
+  const stats = statsLine(a.transcript, resolveContextWindow(a.contextWindow))
   if (stats) lines.push(`📦 ${stats}`)
 
   const max = a.maxLines ?? 9
@@ -124,6 +125,9 @@ export function normalizeCardLine(line: string): string {
     .replace(/(\d+)\s*分\s*\d+\s*秒/g, '$1 分')
     .replace(/\d+\s*秒/g, '')
     .replace(/(\d+)\s*小时\s*\d+\s*分/g, '$1 小时')
+    // 前两分钟显示的是 m:ss（`已 0:07`、`已 1:23`），不带「分/秒」字样，
+    // 上面三条一个都不命中 —— 实测每秒一个新签名，照样每拍 patch 一次。
+    .replace(/\b(\d{1,3}):\d{2}\b(?!:)/g, '$1 分')
     .replace(/\s{2,}/g, ' ')
     .trim()
 }

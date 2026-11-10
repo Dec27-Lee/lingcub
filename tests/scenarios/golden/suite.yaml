@@ -1,0 +1,18 @@
+# golden 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: golden
+domain: golden
+scenarios:
+  - id: GOLDEN-INT-001
+    title: 控制台金标：固定输入与基线逐字一致
+    layer: integration
+    priority: P1
+    tags:
+      - golden
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/golden/golden.test.ts
+    assertions:
+      - 控制台金标：固定输入与基线逐字一致
+    timeoutSec: 60
+    file: tests/specs/golden/golden.test.ts

@@ -1,0 +1,101 @@
+# routing 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: routing
+domain: routing
+scenarios:
+  - id: ROUTING-INT-001
+    title: 自动回复：策略从上往下，先命中的生效
+    layer: integration
+    priority: P1
+    tags:
+      - routing
+      - auto
+      - reply
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/routing/auto-reply.test.ts
+    assertions:
+      - 自动回复：策略从上往下，先命中的生效
+      - 自动回复：关掉的策略永不触发
+      - 自动回复：三种比对方式；正则写错当作不命中，不卡住其他条件
+      - 自动回复：afterSeconds 要等够时间；busy 时不按「停下」判
+      - 自动回复：busy 时机按已跑时长判，且不看内容
+      - 自动回复：busy 条件里填比对文本要报错（语义不对，别悄悄按错的跑）
+      - 自动回复事实：Stop 之后记为「停了」，投递之后记为「在跑」
+      - 触发判据：不填比对文本就只看时机
+      - 自动回复真的投进窗口：策略命中 → 发件箱 → 执行器 post（带来源标记）
+    timeoutSec: 60
+    file: tests/specs/routing/auto-reply.test.ts
+  - id: ROUTING-INT-002
+    title: 命令解析：只认第一行的固定词，其它当普通消息
+    layer: integration
+    priority: P1
+    tags:
+      - routing
+      - commands
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/routing/commands.test.ts
+    assertions:
+      - 命令解析：只认第一行的固定词，其它当普通消息
+      - "#stop 停窗口并置 stopped，不再投递"
+      - "#pin / #unpin 作用在状态卡上；没有卡就明确失败"
+      - "#status 与 #help 都是回一句话，不打扰窗口"
+      - 在场探测：没有采样就当作不在；采样新鲜且空闲短才算在
+      - 置顶账：只撤自己置的；停窗口顺手撤
+      - 回执冷却：同一类回执在冷却窗口内只回一次，换一类照回
+      - "#resume / #new：恢复与换窗口，已停的窗口先回一句再谈"
+      - 状态卡：按间隔把执行器最新一行进度刷上去
+      - 状态卡：读不到新进度就不动卡（别把空内容刷上去）
+      - 提醒会 @ 发起人；没有发起人 id 就不编
+      - 置顶对账：刚置上不到 5 分钟的先不撤（撤了下一秒又要置上）
+    timeoutSec: 60
+    notes: 另有 13 条断言见用例文件
+    file: tests/specs/routing/commands.test.ts
+  - id: ROUTING-UNIT-003
+    title: 门禁拒绝：工作区不在执行器 allowRoots 内时抛错，不产出 Work
+    layer: unit
+    priority: P0
+    tags:
+      - routing
+      - resolve
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/routing/resolve.test.ts
+    assertions:
+      - 门禁拒绝：工作区不在执行器 allowRoots 内时抛错，不产出 Work
+      - 门禁放宽后同一输入产出 Work（证明上一条是门禁在拦）
+      - observe 档只记录：不产出 Work，也不做门禁
+      - auto 档置信度不足只跳过，不入队
+      - suggest 档不受置信度门槛限制，但仍产出待确认的 Work
+      - 项目缺失或匹配不上 → 跳过并说明原因，不乱派
+      - 不需要执行器的意图不产出 Work
+      - 项目别名可命中工作区
+      - prompt 带上原文、来源与伞形工作区的路由提示
+    timeoutSec: 60
+    file: tests/specs/routing/resolve.test.ts
+  - id: ROUTING-UNIT-004
+    title: 首个命中即停：两条规则都能匹配，只认第一条
+    layer: unit
+    priority: P0
+    tags:
+      - routing
+      - rules
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/routing/rules.test.ts
+    assertions:
+      - 首个命中即停：两条规则都能匹配，只认第一条
+      - 谓词之间是 AND：atMe 不满足就往下走
+      - "groupIn: allowlist 只认 allowlist 里的群"
+      - 生产规则：钉钉单聊只有真问句才落只读，陈述继续往下走
+      - 规则不写 suggestedAction 时按 kind 查表补默认动作
+      - 规则可覆盖默认动作与 project
+      - 未命中任何规则返回 null（交给分类器）
+      - 未知谓词键直接报错，不静默失效
+      - 空谓词直接报错，避免写成匹配一切
+      - textMatches 非法正则在加载期就报错
+      - 规则 id 重复报错
+      - 仓库自带的 config/rules.yaml 能加载
+    timeoutSec: 60
+    file: tests/specs/routing/rules.test.ts

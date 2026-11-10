@@ -741,6 +741,32 @@ export function registerKernelCapabilities(deps: KernelCapabilityDeps): void {
     { provider: 'kernel', internal: true },
   )
 
+  // 同一会话此前几条消息的分析结论：分析服务把它喂回模型，
+  // 模型才分得清「这件事在推进」和「同一条例行推送又来了」，不必重新读一遍原文。
+  capabilities.provide(
+    {
+      name: 'state.analysis.recent',
+      effect: 'none',
+      input: z.object({
+        channelId: z.string().min(1),
+        before: z.string().optional(),
+        limit: z.number().int().positive().max(20).default(5),
+      }),
+      output: z.object({
+        items: z.array(
+          z.object({
+            at: z.string(),
+            summary: z.string(),
+            points: z.array(z.string()).optional(),
+            urgency: z.enum(['low', 'normal', 'high']).optional(),
+          }),
+        ),
+      }),
+    },
+    (input) => ({ items: store.recentAnalyses(input.channelId, input.before, input.limit ?? 5) }),
+    { provider: 'kernel', internal: true },
+  )
+
   capabilities.provide(
     {
       name: 'state.analysis.pending',

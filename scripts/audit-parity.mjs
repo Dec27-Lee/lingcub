@@ -6,7 +6,8 @@
  * 用法：node scripts/audit-parity.mjs
  */
 
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /** 每条：编号、名字、落点符号（`文件:符号`；只写文件表示「文件存在即可」） */
 const ROWS = [
@@ -31,7 +32,7 @@ const ROWS = [
   [19, '提醒卡分类去重', ['src/kernel/hook-handlers.ts:notifyKind', 'src/kernel/hook-handlers.ts:NOTIFY_TITLE']],
   [20, '提醒卡 @', ['src/kernel/hook-handlers.ts:ownerId']],
   [21, '实时状态卡', ['src/kernel/card-content.ts:buildStatusCard', 'src/kernel/transcript.ts:currentTurn']],
-  [22, '状态卡换卡', ['src/kernel/pipeline.ts:cardTurn', 'src/kernel/pipeline.ts:card_patch']],
+  [22, '状态卡不换消息', ['src/kernel/pipeline.ts:cardTurn', 'src/kernel/pipeline.ts:状态卡原地更新，不换消息']],
   [23, '自动回复策略', ['src/routing/auto-reply.ts:decideAutoReply', 'src/routing/auto-reply.ts:policyProblem']],
   [24, '自动回复投递', ['src/kernel/pipeline.ts:autoReplyTick', 'src/kernel/store.ts:canAutoReply']],
   [25, '图片转发与清理', ['src/kernel/pipeline.ts:downloadImage', 'src/kernel/cleanup.ts:cleanupImages']],
@@ -55,8 +56,8 @@ const CONVENTIONS = [
   [5, '终端输入两档', ['src/kernel/notice-card.ts:SAID_INLINE_MAX', 'src/kernel/notice-card.ts:SAID_FULL_MAX']],
   [6, '题卡状态机', ['src/kernel/pipeline.ts:#settleQuestionCard', 'src/kernel/store.ts:questionCard']],
   [7, '权限卡四按钮', ['src/kernel/questions.ts:buildPermissionCard', 'src/kernel/pipeline.ts:#answerPermissionByCard']],
-  [8, '换卡撤旧置顶', ['src/kernel/pipeline.ts:pinMessage(old.messageId, false)']],
-  [9, '改卡失败换新卡', ['src/kernel/pipeline.ts:store.dropCard(session.id)']],
+  [8, '改卡后补回置顶', ['src/kernel/pipeline.ts:ensureCardPinned']],
+  [9, '话题根改不动也不换消息', ['src/kernel/pipeline.ts:话题根不可替换']],
   [10, '子任务黄灯', ['src/kernel/transcript.ts:openSubtasks', 'src/kernel/card-content.ts:🟡 本轮已回复']],
   [11, '就绪卡', ['src/plugins/channel-feishu/card.ts:renderReadyCard']],
   [12, '在场阈值 180 秒', ['src/kernel/presence.ts:AWAY_IDLE_MS = 180_000']],
@@ -88,7 +89,7 @@ const TEST_HINTS = {
   19: ['notifyKind', '提醒卡'],
   20: ['ownerId', '@'],
   21: ['buildStatusCard', '状态卡'],
-  22: ['cardTurn', '换卡'],
+  22: ['cardTurn', '原地更新'],
   23: ['decideAutoReply', '自动回复'],
   24: ['autoReplyTick', '自动回复'],
   25: ['cleanupImages', '图片'],
@@ -108,10 +109,14 @@ function declares(body, symbol) {
   return body.includes(symbol)
 }
 
-const testBlob = (await import('node:fs'))
-  .readdirSync('test')
-  .filter((f) => f.endsWith('.test.ts'))
-  .map((f) => readFileSync(`test/${f}`, 'utf8'))
+/** 用例按域分目录（tests/specs/<domain>/），这里递归取全部 .test.ts */
+function walkTests(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+    d.isDirectory() ? walkTests(join(dir, d.name)) : d.name.endsWith('.test.ts') ? [join(dir, d.name)] : [],
+  )
+}
+const testBlob = walkTests('tests/specs')
+  .map((f) => readFileSync(f, 'utf8'))
   .join('\n')
 
 let missingTotal = 0

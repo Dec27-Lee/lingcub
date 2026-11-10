@@ -1,6 +1,5 @@
 /** 主流程：Event 进 → 判断 → 分派 → 发件箱 → 投递；执行完成后再回收结果。 */
 
-import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import type { Channel, Classifier, Executor, Log } from '../domain/ports.ts'
 import type { Action, CardState, Event, Intent, Progress, ProjectCandidate, Session, Work } from '../domain/types.ts'
@@ -15,6 +14,7 @@ import { buildStatusCard, statusCardSignature } from './card-content.ts'
 import { buildNoticeCard } from './notice-card.ts'
 import { currentTurn, findTranscript, isTurnOpen } from './transcript.ts'
 import { statsLine } from './transcript.ts'
+import { resolveContextWindow } from './context-window.ts'
 import { startSession } from './session-start.ts'
 import { requestSessionOpen } from './session-open.ts'
 import { assertAllowedRoot } from '../domain/allow-root.ts'
@@ -33,6 +33,25 @@ export type IngestOutcome = 'duplicate' | 'posted' | 'ignored' | 'observed' | 's
 
 /** 没有会话层时的空查表：一切消息都走判断。 */
 const NO_SESSIONS: SessionLookup = { findSessionByThread: () => null }
+
+/**
+ * 「电脑上自己开的窗口」接进飞书时的来源标签。
+ *
+ * 按执行器分开记：会话行上的 executor 只影响投递走哪个端口，
+ * 下游按 source 判断「这条会话从哪来」（比如要不要发结果回执）时还得靠它。
+ */
+export const SOURCE_LOCAL_CLAUDE = 'source-local-claude'
+export const SOURCE_LOCAL_DSH = 'source-local-dsh'
+
+/**
+ * 采纳窗口的会话 id：取执行器会话 id 的前 8 位当短名。
+ *
+ * dsh 的会话 id 是 `session-<uuid>`，直接切前 8 位会得到 `session-`——
+ * 所有 dsh 窗口撞成同一个 id，从第二个起全被当成「已经接过」而静默丢掉。
+ */
+export function localSessionId(executorSessionId: string): string {
+  return `sess-local-${executorSessionId.replace(/^session-/, '').slice(0, 8)}`
+}
 
 /** 候选项目只来自 config/projects.yaml：模型在这张表里挑，不许自己编。 */
 export function candidatesOf(projects: Projects): ProjectCandidate[] {
@@ -67,6 +86,75 @@ function channelPort(ports: Ports, config: Config): Channel {
   return ch
 }
 
+/**
+ * 从平台的置顶列表里挑出「没人认领」的那些：
+ *   - 不在 keep 里（不是任何活窗口当前的卡）
+ *   - 明确是机器人 pin 的（`operatorIdType === 'app'`）；不知道谁 pin 的一律不动，免得撤掉用户自己置顶的消息
+ */
+export function pickOrphanPins(
+  pins: readonly { messageId: string; operatorIdType?: string }[],
+  keep: ReadonlySet<string>,
+  limit = 10,
+): string[] {
+  if (limit <= 0) return []
+  const out: string[] = []
+  for (const p of pins) {
+    if (out.length >= limit) break
+    if (!p.messageId || keep.has(p.messageId)) continue
+    // 实测飞书返回的是 `app_id`；用户手动置顶是 `user_id`/`open_id`。只认机器人自己置的。
+    if (!p.operatorIdType || !p.operatorIdType.startsWith('app')) continue
+    out.push(p.messageId)
+  }
+  return out
+}
+
+/**
+ * 该补置顶的卡：活窗口当前那张卡，且本地记着还没置顶。
+ * 新卡走 `card_send`（不置顶），所以只有 adopt 那一刻会 pin——不补的话活窗口会一张置顶都没有。
+ */
+export function pickPinsToRestore(
+  candidates: readonly { sessionId: string; messageId: string; pinned: boolean; alive: boolean }[],
+  limit = 3,
+): { sessionId: string; messageId: string }[] {
+  if (limit <= 0) return []
+  const out: { sessionId: string; messageId: string }[] = []
+  for (const c of candidates) {
+    if (out.length >= limit) break
+    if (!c.alive || c.pinned || !c.messageId) continue
+    out.push({ sessionId: c.sessionId, messageId: c.messageId })
+  }
+  return out
+}
+
+/**
+ * 「这个窗口现在还开着吗」——决定要不要保留/补回它的置顶。
+ *
+ * **只看 `status`**，而 status 由两件事实维护：claude 的 `agents --json` 进程表
+ * （`reapDeadSessions` 每轮对一次），以及用户显式的 `#stop`。
+ *
+ * 不能在这里叠「多久没说话」：窗口开着、人在看代码一小时没发言，按时间判就会把
+ * 它的置顶撤掉（2026-11-09 就这么丢掉过 5 个窗口的置顶）。dsh 连进程信号都没有，
+ * 拿「会话文件多久没动」当关窗信号同样会把「开着但没人说话」的窗口判死——
+ * 所以 dsh 的生命周期只由 `#stop` 结束，不猜。
+ */
+export function windowStillOpen(s: { status: string }): boolean {
+  return s.status === 'active'
+}
+
+/**
+ * 改卡失败是不是「临时的」（网络 / 超时 / 限流）。
+ *
+ * 这类失败**不能换新卡**：换卡等于撤掉旧卡的置顶、再给新卡重新置顶，
+ * 而重试期间旧卡已经没人认领了（2026-11-09：token 接口超时 → 改卡失败 → 换新卡 → 置顶也失败 → 那个窗口的置顶就没了）。
+ * 只有「消息不存在 / 超过 14 天 / 被撤回」这种说了也改不动的，才值得换卡。
+ */
+export function isTransientCardError(message: string): boolean {
+  // 超时的文案来自 plugin-kit/spawn.ts 的中文「命令超时」，只认英文关键词会把它判成永久失败
+  return /network|timeout|timed out|deadline|rate limit|too many|429|502|503|504|ECONNRESET|ETIMEDOUT|超时/i.test(
+    message,
+  )
+}
+
 /** 发件箱的投递实现：把 Action 交给对应端口。 */
 export function createDeliver(deps: {
   ports: Ports
@@ -77,6 +165,25 @@ export function createDeliver(deps: {
   log: Log
 }): Deliver {
   const { ports, config, projects, store, eventLog, log } = deps
+  /**
+   * 状态卡必须一直钉在飞书的「Pin 消息」面板里：那张卡就是话题根消息，
+   * 而面板只列主消息流的消息 —— 面板里没有它，等于这个窗口在控制台里不存在。
+   *
+   * 会丢的情况都真实发生过：平台侧被撤、早期发卡没钉上、卡换过消息。
+   * 所以每次改卡/建卡之后都过一遍这里；本地记着已置顶就不再调 CLI（一次 pin 一个子进程）。
+   */
+  const ensureCardPinned = async (ch: Channel, sessionId: string, messageId: string): Promise<void> => {
+    if (!pinEnabled(config) || !ch.pinMessage) return
+    if (store.isCardPinned(sessionId)) return
+    try {
+      await ch.pinMessage(messageId, true)
+      store.setCardPinned(sessionId, true)
+      log('info', `补回置顶：${sessionId}（${messageId}）`)
+    } catch (e) {
+      // 置顶失败不影响卡内容本身：下一拍还会再试
+      log('warn', `补置顶失败（下轮再试）：${sessionId} — ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
   return async (action: Action, key: string) => {
     switch (action.kind) {
       case 'open_session': {
@@ -262,34 +369,6 @@ export function createDeliver(deps: {
         if (sent.status === 'gone') throw new Error('卡片发送失败（频道返回 gone）')
         return { externalId: sent.messageId }
       }
-      case 'card_retire': {
-        // 一轮结束后把状态卡「关掉」（参考项目 retireCard）：改成灰的收尾卡、撤掉置顶、从 cards 表删掉。
-        // 这样话题里不会长期挂着一张会自己变的状态卡，下一轮开始时会另起一张。
-        const ch = channelPort(ports, config)
-        const card = store.getCard(action.sessionId)
-        if (!card || card.signature === '__pin_only__') return
-        if (typeof ch.patchCard === 'function') {
-          try {
-            await ch.patchCard(card.messageId, {
-              config: { wide_screen_mode: true },
-              header: { template: 'grey', title: { tag: 'plain_text', content: '上一轮的状态' } },
-              elements: [{ tag: 'markdown', content: "<font color='grey'>这一轮已结束，回复见上方。</font>" }],
-            })
-          } catch (e) {
-            log('warn', `状态卡收尾失败（不影响结果）：${e instanceof Error ? e.message : String(e)}`)
-          }
-        }
-        if (ch.pinMessage) {
-          try {
-            await ch.pinMessage(card.messageId, false)
-          } catch {
-            /* 撤置顶失败不影响结果 */
-          }
-        }
-        store.dropCard(action.sessionId)
-        log('info', `状态卡已收掉：${action.sessionId}`)
-        return
-      }
       case 'card_patch': {
         const ch = channelPort(ports, config)
         if (typeof ch.patchCard !== 'function') throw new Error('频道插件不支持改卡')
@@ -310,36 +389,48 @@ export function createDeliver(deps: {
         // '__pin_only__' 是「置顶记账」占位，不是真状态卡：当成还没有卡，直接发新的
         const raw = store.getCard(session.id)
         const prev = raw && raw.signature !== '__pin_only__' ? raw : undefined
-        if (prev && prev.signature === action.signature) {
+        // 状态卡永远挂在**话题根消息**上：只有根消息在群主消息流的「Pin 消息」面板里可见。
+        // 历史上曾把卡换成话题内第 N 条消息（一轮一张），那些消息 pin 了也不出现在面板里。
+        const rootId = session.rootMessageId
+        const target = rootId && rootId !== prev?.messageId ? rootId : prev?.messageId
+        if (prev && prev.signature === action.signature && target === prev.messageId) {
           log('debug', `状态卡没变，跳过 ${session.id}`)
           return
         }
-        if (prev) {
+        if (target) {
           try {
-            await ch.patchCard(prev.messageId, action.card)
-            store.upsertCard(session.id, prev.chatId, prev.messageId, action.signature)
-            log('info', `状态卡已更新：${session.id}`)
-            return
+            await ch.patchCard(target, action.card)
           } catch (err) {
-            // 改不动了（超过 14 天上限、卡被撤回、别人删了…）：换一张新卡继续，
-            // 否则这张死卡会让这个窗口的状态永远停在旧内容。
-            log('warn', `状态卡改不动，换新卡：${session.id} — ${err instanceof Error ? err.message : String(err)}`)
-            store.dropCard(session.id)
+            const msg = err instanceof Error ? err.message : String(err)
+            if (isTransientCardError(msg)) {
+              // 临时失败（网络/超时/限流）：这张卡还会被重试，别换卡——换卡会连带把它的置顶弄丢
+              throw new Error(`改卡临时失败（下一轮重试，保留原卡）：${msg}`)
+            }
+            // 根消息改不动（超 14 天、被撤回）：**不能换**——话题根换了，话题就断了。
+            // 记一条警告，等人工处理；继续用这张卡显示旧内容，总比整个窗口失联好。
+            log('warn', `状态卡改不动（话题根，不换卡）：${session.id} — ${msg}`)
+            throw new Error(`改卡失败（话题根不可替换）：${msg}`)
           }
+          store.upsertCard(session.id, prev?.chatId ?? session.chatId, target, action.signature)
+          // 改卡成功 ≠ 还钉着：平台侧撤过、历史上没钉上的卡，都在这里补回来
+          await ensureCardPinned(ch, session.id, target)
+          log('info', `状态卡已更新：${session.id}`)
+          return
         }
         const sentCard = await ch.sendCard(
-          // 状态卡是每个窗口唯一那条「会一直更新」的消息，置顶它；就绪卡不置顶
+          // pin 交给 ensureCardPinned：频道内部 pin 失败只 warn，内核却已经记账成「已置顶」，
+          // 两边对不上，撤的时候就会漏（2026-11-09 置顶越来越少就是这么来的）。
           {
             chatId: session.chatId,
             replyTo: session.rootMessageId ?? session.threadId,
             card: action.card,
-            pin: true,
+            pin: false,
           },
           `${key}:card`,
         )
         if (!sentCard.messageId) throw new Error('发卡没拿到消息 id，之后没法原地更新（检查 messageIdPath）')
         store.upsertCard(session.id, session.chatId, sentCard.messageId, action.signature)
-        if (pinEnabled(config)) store.markPinned(session.id, session.chatId, sentCard.messageId)
+        await ensureCardPinned(ch, session.id, sentCard.messageId)
         // 这条卡就是话题的根：把 thread/root 补绑上，之后话题里的消息才能路由回这个会话
         // （电脑上自己开的窗口靠这一句才「能对话」，否则消息只会被当成开窗向导）
         // 飞书的根消息 id（om_…）≠ 话题 id（omt_…）：话题 id 得回头问一次，
@@ -556,6 +647,8 @@ export class Pipeline {
   readonly #cardRefreshedAt = new Map<string, number>()
   /** 自动回复巡检的节流时间戳 */
   #lastAutoReplyPoll = 0
+  /** 置顶列表对账的节流时间戳（listPins 是一次真接口调用，别跟着每轮 tick 打） */
+  #lastPinSyncAt = 0
 
   constructor(deps: PipelineDeps) {
     this.#d = deps
@@ -1093,7 +1186,7 @@ export class Pipeline {
    * 先问选哪个工作区；只有一个工作区就不问。选中后派工，由投递环节发锚消息、把话题绑成会话。
    */
   async #openFlow(e: Event): Promise<IngestOutcome | null> {
-    const { store, outbox, config, projects, log } = this.#d
+    const { store, outbox, config, log } = this.#d
     if ((config.sessions?.newTopicPolicy ?? 'judge') !== 'open') return null
     if (e.channel.kind !== 'group') return null
 
@@ -1846,18 +1939,10 @@ export class Pipeline {
     const graceMs = (config.sessions?.closeGraceMinutes ?? 2) * 60_000
     const now = Date.now()
     const active = store.listSessions('active').filter((s) => s.executor === 'claude' && s.sessionId)
-    /** dsh 没有任何「窗口关没关」的信号，只能按最后活跃时间把它从「在跑」降到「空闲」 */
-    const dshStaleMs = (config.sessions?.staleMinutes ?? 30) * 60_000
-    let idled = 0
-    for (const s of store.listSessions('active')) {
-      if (s.executor !== 'dsh') continue
-      const lastActive = Date.parse(s.lastActiveAt)
-      if (!Number.isFinite(lastActive) || now - lastActive < dshStaleMs) continue
-      store.setSessionStatus(s.id, 'idle')
-      idled++
-      log('info', `会话闲置：${s.id}（dsh，${Math.round((now - lastActive) / 60_000)} 分钟没动静）→ idle`)
-    }
-    if (!active.length) return idled
+    // dsh 没有进程信号、也没有「窗口关了」的事件：拿「多久没说话」当关窗信号会误杀
+    // 「开着但没人说话」的窗口，连带撤掉它的置顶（2026-11-09 每半小时掉一次就是这个）。
+    // 所以 dsh 只由 `#stop` 结束，这里不碰它。
+    if (!active.length) return 0
     // 一次问一个执行器就够：claude 只有一种 policy
     const exec = executorPort(ports, config, 'claude')
     if (!exec?.listLiveSessions) {
@@ -1885,7 +1970,7 @@ export class Pipeline {
       log('info', `关窗回收：${s.id}（${s.title ?? s.sessionId}）不在在跑列表里，标记 dead`)
     }
     void projects
-    return reaped + idled
+    return reaped
   }
 
   /**
@@ -1897,51 +1982,86 @@ export class Pipeline {
     const { store, ports, config, log } = this.#d
     if (!config.sessions?.adoptLocalWindows) return 0
     const { outbox } = this.#d
-    const exec = executorPort(ports, config, 'claude')
-    if (!exec?.listLiveSessions) return 0
-    let live: { sessionId: string; cwd: string; title?: string; status?: string }[]
-    try {
-      live = (await exec.listLiveSessions()) as typeof live
-    } catch (e) {
-      log('debug', `扫本地窗口失败（不影响主流程）：${e instanceof Error ? e.message : String(e)}`)
-      return 0
-    }
     const chatId = Object.values(config.channels)[0]?.defaultChatId
     if (!chatId) return 0
     const limit = config.sessions?.adoptPerRun ?? 2
     let adopted = 0
-    for (const s of live) {
+    // 两种执行器各扫各的：claude 靠 `agents --json` 报的忙闲，dsh 只能按会话文件 mtime 推断。
+    // 没配 executor_policies 的那种跳过——配置里只开了一种执行器时，另一种不该把整轮读窗口打挂。
+    const kinds = (['claude', 'dsh'] as const).filter((k) => config.executor_policies[k])
+    for (const kind of kinds) {
       if (adopted >= limit) break
-      if (!s.sessionId || !s.cwd) continue
-      if (store.findSessionByExecutor(s.sessionId)) continue
-      const id = `sess-local-${s.sessionId.slice(0, 8)}`
-      if (store.getSession(id)) continue
-      const now = new Date().toISOString()
-      const title = (s.title && s.title.trim()) || s.cwd.replace(/\\/g, '/').split('/').filter(Boolean).pop() || s.sessionId.slice(0, 8)
-      store.insertSession({
-        id,
-        chatId,
-        title,
-        executor: 'claude',
-        workspace: s.cwd,
-        sessionId: s.sessionId,
-        status: 'active',
-        createdAt: now,
-        lastActiveAt: now,
-        source: 'source-local-claude',
-      })
-      const card = {
-        title,
-        status: 'done' as const,
-        lines: [`💻 电脑上开的终端窗口（${s.sessionId.slice(0, 8)}）`, `📁 \`${s.cwd}\``, '在这个话题里发消息就能直接投进去。'],
+      const exec = executorPort(ports, config, kind)
+      if (!exec?.listLiveSessions) continue
+      let live: { sessionId: string; cwd: string; title?: string; status?: string; createdAt?: number }[]
+      try {
+        live = (await exec.listLiveSessions()) as typeof live
+      } catch (e) {
+        log('debug', `扫本地 ${kind} 窗口失败（不影响主流程）：${e instanceof Error ? e.message : String(e)}`)
+        continue
       }
-      // 用卡片建话题：它同时是这条话题的根消息，也是这个窗口的状态卡（置顶）
-      outbox.enqueue(
-        { kind: 'card_upsert', sessionId: id, card, signature: cardSignature(card) },
-        dedupeKey(id, 'local-adopt'),
-      )
-      adopted++
-      log('info', `接进飞书：${title}（${s.sessionId.slice(0, 8)} @ ${s.cwd}）`)
+      for (const s of live) {
+        // 上限按两种执行器合计算：分开计数会让一轮冒出两倍的窗口
+        if (adopted >= limit) break
+        if (!s.sessionId || !s.cwd) continue
+        const known = store.findSessionByExecutor(s.sessionId)
+        if (known) {
+          // 窗口还活着，但之前被关窗回收标过 dead（重启、短暂扫不到都会）：
+          // 不复活就会一直撤它的置顶、不刷状态卡——用户看到「我明明开着，卡片却没了」。
+          if (known.status !== 'active') {
+            store.setSessionStatus(known.id, 'active')
+            store.touchSession(known.id)
+            log('info', `窗口复活：${known.id}（${known.title ?? s.sessionId.slice(0, 8)}）`)
+          } else if (kind === 'dsh') {
+            // dsh 没有进程状态：扫到「会话文件还在动」就是它在活动的唯一证据。
+            // 不刷新活跃时间的话，你明明在用、只是没说话，半小时后也会被标 idle → 撤掉置顶（2026-11-09 反复出现）。
+            store.touchSession(known.id)
+          }
+          continue
+        }
+        // 老会话被「翻开来写一行」也会命中「90 秒内动过」，不能当新窗口接进来：
+        // dsh 没有窗口概念，只能拿创建时间挡（2026-11-09：11-04 建的会话被激活，刷出两个莫名其妙的话题）。
+        const freshMs = (config.sessions?.adoptNewMinutes ?? 10) * 60_000
+        if (kind === 'dsh' && typeof s.createdAt === 'number' && Date.now() - s.createdAt > freshMs) {
+          log('debug', `跳过老 dsh 会话（${Math.round((Date.now() - s.createdAt) / 60_000)} 分钟前建的）：${s.sessionId.slice(0, 12)}`)
+          continue
+        }
+        const id = localSessionId(s.sessionId)
+        if (store.getSession(id)) continue
+        const now = new Date().toISOString()
+        const title = (s.title && s.title.trim()) || s.cwd.replace(/\\/g, '/').split('/').filter(Boolean).pop() || s.sessionId.slice(0, 8)
+        store.insertSession({
+          id,
+          chatId,
+          title,
+          executor: kind,
+          workspace: s.cwd,
+          sessionId: s.sessionId,
+          status: 'active',
+          createdAt: now,
+          lastActiveAt: now,
+          source: kind === 'dsh' ? SOURCE_LOCAL_DSH : SOURCE_LOCAL_CLAUDE,
+        })
+        const card = {
+          title,
+          status: 'done' as const,
+          lines: [`💻 电脑上开的终端窗口（${kind} ${id.replace('sess-local-', '')}）`, `📁 \`${s.cwd}\``, '在这个话题里发消息就能直接投进去。'],
+        }
+        // 用卡片建话题：它同时是这条话题的根消息，也是这个窗口的状态卡（置顶）
+        outbox.enqueue(
+          { kind: 'card_upsert', sessionId: id, card, signature: cardSignature(card) },
+          dedupeKey(id, 'local-adopt'),
+        )
+        adopted++
+        // dsh 没有可读的进程状态，listLiveSessions 只按「会话文件 90 秒内动过」推断（dsh-discover.ts:125），
+        // 日志里写清楚，别让读日志的人以为这是真的在跑
+        log(
+          'info',
+          `接进飞书：${title}（${kind} ${id.replace('sess-local-', '')} @ ${s.cwd}）${
+            kind === 'dsh' ? '；dsh 的「在跑」是会话文件推断值，不是进程状态' : ''
+          }`,
+        )
+      }
     }
     return adopted
   }
@@ -1960,6 +2080,12 @@ export class Pipeline {
         store.setSessionRoot(s.id, usable.messageId)
         log('info', `话题根补绑：${s.id} → ${usable.messageId}`)
       }
+      // 历史上状态卡曾发到话题内（一轮一张），那些消息 pin 了也不出现在群主消息流的置顶面板里。
+      // 卡记录指回话题根，pin 才会跟着根走——根是唯一在主消息流可见的那条。
+      if (usable && s.rootMessageId && usable.messageId !== s.rootMessageId) {
+        store.upsertCard(s.id, usable.chatId, s.rootMessageId, usable.signature)
+        log('info', `状态卡迁回话题根：${s.id} → ${s.rootMessageId}`)
+      }
       if (!usable) continue
       if (s.threadId?.startsWith('omt_')) continue
       const tid = ch?.threadIdOf ? await ch.threadIdOf(usable.messageId).catch(() => undefined) : undefined
@@ -1970,15 +2096,11 @@ export class Pipeline {
     }
     if (!ch?.pinMessage) return 0
     let fixed = 0
-    // 「还在 active 但很久没动静」也要撤：窗口关了不会有事件，只能按最后活跃时间判
-    const staleMs = (config.sessions?.staleMinutes ?? 30) * 60_000
+    const now = Date.now()
     // 每轮最多撤 10 条：一次撤太多会撞频率限制，也让日志难看
     for (const s of store.listSessions()) {
       if (fixed >= 10) break
-      if (s.status === 'active') {
-        const lastActive = Date.parse(s.lastActiveAt)
-        if (!Number.isFinite(lastActive) || Date.now() - lastActive < staleMs) continue
-      }
+      if (windowStillOpen(s)) continue
       if (!store.isCardPinned(s.id)) continue
       const card = store.getCard(s.id)
       if (!card) continue
@@ -1994,7 +2116,113 @@ export class Pipeline {
         log('warn', `置顶对账失败（下次再试）：${e instanceof Error ? e.message : String(e)}`)
       }
     }
+    // 孤儿置顶：一个窗口每轮一张卡，收卡后下一轮另起；cards 表只留最后一张，
+    // 历史卡的置顶就没人认领了（用户看到「只有两个窗口，置顶一大堆」）。以平台列表为准对账。
+    if (ch.listPins) {
+      const chatId = Object.values(config.channels).find((c) => c.defaultChatId)?.defaultChatId
+      if (chatId) {
+        // 每轮 tick 都拉一次列表太重（一次 listPins 就是一个 CLI 子进程）：10 秒一次足够
+        if (now - this.#lastPinSyncAt < 10_000) return fixed
+        this.#lastPinSyncAt = now
+        try {
+          const pins = await ch.listPins(chatId)
+          // 以平台为准校准本地标记：本地「记着置顶」但平台上没有的（被平台侧撤了、或当初 pin 没真的成功），
+          // 不校准就永远不会再补——用户看到的就是「窗口开着，置顶却没有」。
+          const onPlatform = new Set(pins.map((p) => p.messageId))
+          for (const s of store.listSessions()) {
+            const card = store.getCard(s.id)
+            if (!card) continue
+            const actual = onPlatform.has(card.messageId)
+            if (actual !== store.isCardPinned(s.id)) {
+              store.setCardPinned(s.id, actual)
+              log('debug', `置顶标记校准：${s.id} → ${actual ? '已置顶' : '未置顶'}`)
+            }
+          }
+          const keep = new Set<string>()
+          for (const s of store.listSessions()) {
+            const card = store.getCard(s.id)
+            if (!card) continue
+            // 活着的窗口保留它当前的卡；已停的不留（下面统一撤）
+            if (windowStillOpen(s)) keep.add(card.messageId)
+          }
+          const orphans = pickOrphanPins(pins, keep, 10 - fixed)
+          for (const mid of orphans) {
+            try {
+              await ch.pinMessage(mid, false)
+              fixed++
+              log('info', `置顶对账：撤掉没人认领的置顶 ${mid}`)
+            } catch (e) {
+              log('warn', `撤销孤儿置顶失败（下次再试）：${e instanceof Error ? e.message : String(e)}`)
+            }
+          }
+          // 反过来也要补：活窗口的当前卡如果是 `card_send` 发出来的（没走过置顶），
+          // 这里补上，保证「活窗口 = 一张置顶状态卡」这条语义两头都成立。
+          const sessions = store.listSessions()
+          const restore = pickPinsToRestore(
+            sessions.map((s) => ({
+              sessionId: s.id,
+              messageId: store.getCard(s.id)?.messageId ?? '',
+              pinned: store.isCardPinned(s.id),
+              alive: windowStillOpen(s),
+            })),
+            // 上限跟着活窗口数走：写死 3 的话，开了 6 个窗口要等好几轮才能补齐
+            Math.max(3, sessions.length),
+          )
+          for (const r of restore) {
+            try {
+              await ch.pinMessage(r.messageId, true)
+              store.setCardPinned(r.sessionId, true)
+              log('info', `置顶对账：补回活窗口 ${r.sessionId} 的状态卡置顶`)
+            } catch (e) {
+              log('warn', `补置顶失败（下次再试）：${e instanceof Error ? e.message : String(e)}`)
+            }
+          }
+        } catch (e) {
+          log('warn', `置顶列表对账失败（下次再试）：${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+    }
     return fixed
+  }
+
+  /** 单张卡的进度刷新：节流 + 只在内容变化时才入队（签名比较在投递环节）。 */
+  /**
+   * 没有可读转录的窗口（dsh）用库里的事实画一张「会动」的卡。
+   *
+   * 「在跑」三条同时成立：会话还是 active、最近 2 分钟内有活动、那次活动晚于上一轮结束。
+   * 活动时间来自 `adoptLocalWindows` 每 20 秒的扫描（扫到会话文件在动就 touch），
+   * 所以它反映的是「这个窗口有没有在写东西」，不是「用户多久没说话」。
+   */
+  #refreshFactsCard(
+    s: Session,
+    store: Store,
+    outbox: Outbox,
+    log: Log,
+  ): number {
+    const facts = store.sessionFacts(s.id)
+    const activeAt = facts ? Date.parse(facts.lastActiveAt) : Number.NaN
+    const stopAt = facts?.lastStopAt ? Date.parse(facts.lastStopAt) : Number.NaN
+    const fresh = Number.isFinite(activeAt) && Date.now() - activeAt < 120_000
+    const running = s.status === 'active' && fresh && !(Number.isFinite(stopAt) && stopAt > activeAt)
+    const ago = Number.isFinite(activeAt) ? formatElapsed(Math.max(0, Date.now() - activeAt)) : '未知'
+    const said = (facts?.lastText ?? '').replace(/\s+/g, ' ').trim()
+    const card: CardState = {
+      title: s.title ?? s.id,
+      status: running ? 'running' : 'done',
+      lines: [
+        ...(said ? [`💬 你说：${said.length > 60 ? `${said.slice(0, 60)}…` : said}`] : []),
+        running ? `🟢 在跑（最近活跃 ${ago}）` : `⚪ 空闲（最后活跃 ${ago}）`,
+        `📁 \`${s.workspace}\``,
+        'dsh 的过程细节（工具、改动文件）没有可读转录，这里只反映窗口是否在动',
+      ],
+    }
+    const signature = cardSignature(card)
+    outbox.enqueue(
+      { kind: 'card_upsert', sessionId: s.id, card, signature },
+      dedupeKey(`${s.id}-${signature}`, 'card-facts'),
+    )
+    log('debug', `dsh 状态卡：${s.id} → ${running ? '在跑' : '空闲'}`)
+    return 1
   }
 
   /** 单张卡的进度刷新：节流 + 只在内容变化时才入队（签名比较在投递环节）。 */
@@ -2013,7 +2241,6 @@ export class Pipeline {
     if (Date.now() - last < refreshMs) return 0
     if (!s.sessionId) return 0
     const ws = projects.workspaces.find((w) => w.id === s.workspace) ?? { id: s.workspace, root: s.workspace }
-    const exec = ports.executors.get(Object.values(config.executor_policies)[0]?.plugin ?? '')
     const executor = ws ? executorPort(ports, config, s.executor) : null
     if (!ws || !executor) return 0
     this.#cardRefreshedAt.set(s.id, Date.now())
@@ -2022,11 +2249,20 @@ export class Pipeline {
       progress = await executor.read({ executor: s.executor, sessionId: s.sessionId, workspace: ws.root })
     } catch (e) {
       log('debug', `读进度失败（不影响主流程）：${e instanceof Error ? e.message : String(e)}`)
-      return 0
+      // dsh 的 read 本来就没有东西可读：别因此整条链路退出，下面用库里的事实画卡
+      if (s.executor !== 'dsh') return 0
+      progress = []
     }
     const lastLine = [...progress].reverse().find((p) => p.kind === 'output' && p.text)?.text?.trim().split('\n').pop()
     const transcript = (this.#d.transcripts ?? findTranscript)(s.sessionId)
-    if (!transcript && !lastLine) return 0
+    // dsh 的转录在 `~/.dsh` 下的 zstd 多帧文件里，读不出过程细节；但它自己的事实（最后一句、
+    // 最后活跃、上一轮结束时间）都在库里。原来这里直接 return 0，dsh 窗口的卡就永远停在
+    // 接入那一刻（2026-11-09 用户报「实时状态又不显示了」）。
+    if (!transcript && !lastLine) {
+      // dsh 本来就没有可读转录，用库里的事实画一张会动的卡；
+      // claude 读不到转录说明这一拍异常，别拿事实卡去覆盖它正常的进度卡。
+      return s.executor === 'dsh' ? this.#refreshFactsCard(s, store, outbox, log) : 0
+    }
     // 会话真名（claude 自己的 aiTitle）到位就换掉「用户第一句话当标题」——放在任何 return 之前，
     // 否则一轮刚结束时（走补发分支直接 return）标题永远换不过来。
     if (transcript) {
@@ -2036,9 +2272,8 @@ export class Pipeline {
         log('info', `会话改名：${s.id} → ${realTitle}`)
       }
     }
-    // 一轮已结束、且这张卡画的就是它的收尾 → 不用再刷（结束后卡由 card_retire 收掉）。
-    // 不判这个，刚收掉的卡下一拍又会被重新建出来（用户看到「关了又冒出来」）；
-    // 但新一轮（turn id 变了）必须继续走，否则换卡/新卡都出不来。
+    // 一轮已结束、且这张卡画的就是它的收尾 → 不用再刷。
+    // 不判这个，同一张卡每拍都会被重算一遍；但轮次一变必须继续走，否则卡停在上一轮。
     const openTurn = transcript ? currentTurn(transcript) : undefined
     if (transcript && openTurn?.userId && !isTurnOpen(transcript)) {
       // 兜底：钩子丢了（实测 2026-11-06 有一次 POST 没到，整轮回复凭空消失）。
@@ -2057,7 +2292,7 @@ export class Pipeline {
                 title: s.title ?? s.id,
                 cwd: s.workspace,
                 time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
-                stats: statsLine(transcript, config.contextWindow ?? 200_000),
+                stats: statsLine(transcript, resolveContextWindow(config.contextWindow)),
                 body: said || '（这一轮没有输出）',
                 index: 1,
                 total: 1,
@@ -2065,7 +2300,6 @@ export class Pipeline {
             },
             dedupeKey(s.id, `catchup-reply-${openTurn.userId}`),
           )
-          outbox.enqueue({ kind: 'card_retire', sessionId: s.id }, dedupeKey(s.id, 'catchup-retire'))
           store.markReplied(s.id, openTurn.userId)
           // 也记成「这张卡画的是这一轮」：否则下一拍又走正常路径，重建出一张进行中的卡
           store.setCardTurn(s.id, openTurn.userId)
@@ -2077,42 +2311,15 @@ export class Pipeline {
     }
     // 有转录就用它画完整的几行（你说/在跑多久/改了哪些文件/它说/用量）；
     // 没有转录才退回「工作区 + 执行器 + 最后一行日志」。
-    // 换卡：转录里出现了新的一轮（新的 user 消息 id）→ 丢掉旧卡记录，下面会新发一张
     if (transcript) {
-      // 会话真名（claude 自己的 aiTitle）到位后换掉「用户第一句话当标题」
-      const realTitle = transcriptTitle(transcript)
-      if (realTitle && realTitle !== s.title) {
-        store.setSessionTitle(s.id, realTitle)
-        log('info', `会话改名：${s.id} → ${realTitle}`)
-      }
       const turnId = currentTurn(transcript).userId
       const prevTurn = store.cardTurn(s.id)
       if (turnId && prevTurn && turnId !== prevTurn) {
-        const old = store.takeCard(s.id)
-        if (old) {
-          // 旧卡多半还置顶着：先撤下来。takeCard 之后这条记录就没了，再没人能撤它。
-          const ch = channelPort(this.#d.ports, this.#d.config)
-          if (typeof ch.pinMessage === 'function') {
-            await ch.pinMessage(old.messageId, false).catch((err: unknown) =>
-              log('debug', `撤旧卡置顶失败（不影响换卡）：${err instanceof Error ? err.message : String(err)}`),
-            )
-          }
-          // 旧卡不撤回消息，改成灰的——回头看时能分清这里本来有没有东西
-          outbox.enqueue(
-            {
-              kind: 'card_patch',
-              chatId: old.chatId,
-              messageId: old.messageId,
-              card: {
-                title: s.title ?? s.id,
-                status: 'done',
-                lines: ['这一轮已结束，状态见下方最新一张'],
-              },
-            },
-            dedupeKey(`${s.id}-${prevTurn}-end`, 'card-end'),
-          )
-        }
-        log('info', `状态卡换新：${s.id}（新一轮 ${turnId.slice(0, 8)}）`)
+        // **不换卡、不换消息**：同一个窗口永远只用话题根那一条消息。
+        // 理由：飞书的「Pin 消息」面板在群主消息流里只看得到主消息流的消息；
+        // 状态卡如果每轮新发一条，那条落在话题内，pin 了也不出现在面板里（用户反复报「pin 里看不到」）。
+        // 话题根消息本身就在主消息流，patch 它 = 置顶列表里一行一个窗口，内容是实时状态。
+        log('info', `新一轮：${s.id}（${turnId.slice(0, 8)}）——状态卡原地更新，不换消息`)
       }
       if (turnId) store.setCardTurn(s.id, turnId)
     }

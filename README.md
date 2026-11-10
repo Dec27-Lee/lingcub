@@ -26,7 +26,7 @@ pnpm test
 node dist/main.js doctor
 ```
 
-配置在 `config/`，设计在 `docs/`。先读 `docs/000-principles.md`。
+配置在 `config/`，设计在 `docs/`。先读 `docs/design/principles.md`。
 
 ## 代码目录架构
 
@@ -88,8 +88,10 @@ src/
   main.ts          CLI：doctor | run | ui | hook
 config/            事实来源：项目、规则、执行器策略、插件开关
 scripts/           自检、切换、自启、文档检查
-test/              离线测试（node --test）
-docs/              目标、原则、契约、任务台账
+tests/             离线单测（node --test）：scenarios/ 场景登记、specs/ 用例、
+                   scripts/ runner、out/ 产物；规范见 tests/README.md
+docs/              按组分类：design/ 设计正文、runtime/ 执行器与窗口、
+                   platform/ 平台实测事实、reference/ 参考与交接、tasks/ 任务台账
 data/              运行数据（库、日志、图片、钩子端点）
 ```
 
@@ -335,8 +337,10 @@ node scripts/preflight.mjs      # 构建、钩子、档位、订阅、能力自�
 
 | 命令 | 查什么 | 代价 |
 | --- | --- | --- |
-| `pnpm build && pnpm test` | 单测 **486 条**：路由、发件箱、能力、插件、钩子、卡片、自动回复、文档、工作站 | 秒级，纯离线 |
-| `node --test --experimental-strip-types test/e2e.test.ts` | 离线端到端：假 `lark-cli` + 假 `claude`、真内核 | 秒级，不碰订阅 |
+| `pnpm build && pnpm test` | 单测 **612 条 / 118 个场景**：路由、发件箱、能力、插件、钩子、卡片、自动回复、文档、工作站 | 秒级，纯离线 |
+| `node tests/scripts/run-suite.mjs --list` | 场景清单：域、层级、优先级、状态 | 瞬时 |
+| `node tests/scripts/run-suite.mjs --suite=kernel` | 按域跑，产物落 `tests/out/<runId>/` | 秒级 |
+| `node --test --experimental-strip-types tests/specs/flow/e2e.test.ts` | 离线端到端：假 `lark-cli` + 假 `claude`、真内核 | 秒级，不碰订阅 |
 | `pnpm docs:check` | 文档链接、任务台账字段、INDEX 长度 | 瞬时 |
 | `node scripts/audit-parity.mjs` | 能力对齐自审：文档里「已实现」的条目是否有代码落点与测试 | 瞬时 |
 | `node scripts/verify-contracts.mjs` | 平台契约体检：用不存在的 id 调真 `lark-cli`，只验形状 | 约 30 秒，需已登录 |
@@ -356,4 +360,4 @@ node scripts/preflight.mjs      # 构建、钩子、档位、订阅、能力自�
 | `src/desktop` | 工作站面板与只读 API |
 | `config` | 事实来源：项目、规则、执行器策略、插件开关 |
 | `docs` | 目标、原则、契约、任务台账 |
-| `test` | 离线测试 |
+| `tests` | 离线单测：场景登记（`scenarios/`）、用例（`specs/`）、runner 与产物 |

@@ -1,0 +1,320 @@
+# plugin-kit 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: plugin-kit
+domain: plugin-kit
+scenarios:
+  - id: KIT-UNIT-001
+    title: 没装 cc-switch 时返回 null（不该影响没用这个工具的人）
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - cc
+      - switch
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/cc-switch.test.ts
+    assertions:
+      - 没装 cc-switch 时返回 null（不该影响没用这个工具的人）
+      - 探查：解析通用配置与每个服务商的 commonConfigEnabled
+      - 计划：只改通用配置与 commonConfigEnabled=false 的条目
+      - hasHook：只有带 timeout 的才算装上（旧形状要升级）
+      - 合并：保留别人的钩子与非钩子键，只替换同命令的条目
+      - 落盘：写通用配置与独立条目，不碰 claude-desktop，且先备份
+      - 进程检测：tasklist 里有 cc-switch.exe 才算在跑
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/cc-switch.test.ts
+  - id: KIT-UNIT-002
+    title: agents --json：解析出全 uuid / cwd / busy-idle
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - claude
+      - agents
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/claude-agents.test.ts
+    assertions:
+      - agents --json：解析出全 uuid / cwd / busy-idle
+      - agents --json：坏输入（非 JSON / 非数组 / 缺字段）一律跳过，不抛
+      - agents --json：只列 allowRoots 内、且没过期的会话
+      - agents --json：空数组（一个窗口都没开）退回兜底而不是报错
+      - agents --json：从转录里读出入口标记，供上层排除一次性调用
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/claude-agents.test.ts
+  - id: KIT-UNIT-003
+    title: 信任预置：把工作区标记成已信任，其它字段一字不动
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - claude
+      - trust
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/claude-trust.test.ts
+    assertions:
+      - 信任预置：把工作区标记成已信任，其它字段一字不动
+      - 信任预置：已经信任过就不写文件（幂等，不制造备份噪音）
+      - 信任预置：大小写不同也认同一个目录，不新建重复条目
+      - 信任预置：配置文件不存在或坏了就抛错，不瞎写
+      - 信任判定：未登记的 git 仓库要人工确认一次；登记后不用
+      - 信任判定：纯文件夹不弹确认；带 .mcp.json / .claude 设置才弹
+      - 信任预置：子目录与仓库根各写一条，其它项目不动
+      - 信任键：Claude 记的是正斜杠写法（E:/a/b），反斜杠条目它不认
+      - 信任判定：正斜杠条目也算已信任（否则列表会误报「首次要确认」）
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/claude-trust.test.ts
+  - id: KIT-UNIT-004
+    title: 收窗：按 cc-launch-<前8位> 找到根进程，带 /T 连子孙一起关
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - claude
+      - window
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/claude-window.test.ts
+    assertions:
+      - 收窗：按 cc-launch-<前8位> 找到根进程，带 /T 连子孙一起关
+      - 收窗：没找到进程就返回 0（窗口可能已经自己退了）
+      - 收窗：非 Windows 直接返回 0，不执行任何命令
+      - 开窗超时：会先收窗再报错，错误里说明可能是信任确认框
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/claude-window.test.ts
+  - id: KIT-UNIT-005
+    title: 钉钉日报：去掉尾部链接块和空字段噪声
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - dingtalk
+      - report
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/dingtalk-report.test.ts
+    assertions:
+      - 钉钉日报：去掉尾部链接块和空字段噪声
+      - 普通消息保持原文
+      - 只有日报链接的消息：只保留标题
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/dingtalk-report.test.ts
+  - id: KIT-UNIT-006
+    title: 媒体提示清洗：图片占位符后的命令提示被去掉
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - dingtalk
+      - text
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/dingtalk-text.test.ts
+    assertions:
+      - 媒体提示清洗：图片占位符后的命令提示被去掉
+      - 媒体提示清洗：视频/文件类占位符同样只留占位符
+      - 媒体提示清洗：普通消息原样返回，不误删正文里的链接
+      - 媒体提示清洗：提示和正文混排时保留正文
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/dingtalk-text.test.ts
+  - id: KIT-UNIT-007
+    title: 工作区扫描：登记过的 + 转录里出现过的，且只在允许根之内
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - discover
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/discover.test.ts
+    assertions:
+      - 工作区扫描：登记过的 + 转录里出现过的，且只在允许根之内
+      - 允许根判断：根本身算在内，前缀相近但不同级的不算
+      - 转录尾部取 cwd：只读尾巴也能拿到最后一条
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/discover.test.ts
+  - id: KIT-UNIT-008
+    title: dsh 会话发现：读 projcache 的 cwd/标题，按 allowRoots 过滤
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - dsh
+      - discover
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/dsh-discover.test.ts
+    assertions:
+      - dsh 会话发现：读 projcache 的 cwd/标题，按 allowRoots 过滤
+      - dsh 会话发现：文件新近更新的算在跑，旧的算历史
+      - dsh 会话发现：超过 resumeDays 的会话不列
+      - dsh 工作区：同一 cwd 只列一次，按最近活动排序
+      - dsh 会话文件定位：找不到会话目录返回 undefined，不抛错
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/dsh-discover.test.ts
+  - id: KIT-UNIT-009
+    title: 飞书历史解析：取正文、按时间升序、排除卡片空消息
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - feishu
+      - history
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/feishu-history.test.ts
+    assertions:
+      - 飞书历史解析：取正文、按时间升序、排除卡片空消息
+      - 飞书历史解析：before 之后的消息不进入上下文
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/feishu-history.test.ts
+  - id: KIT-UNIT-010
+    title: 代答类钩子：必须带 matcher 与 1900 秒超时（默认 60 秒会把等人的那一轮掐断）
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - hook
+      - config
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/hook-config.test.ts
+    assertions:
+      - 代答类钩子：必须带 matcher 与 1900 秒超时（默认 60 秒会把等人的那一轮掐断）
+      - 钩子条目形状：matcher 在组上、timeout 在 hook 上
+      - 按命令识别旧条目：改形状时要能把旧的剔掉
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/hook-config.test.ts
+  - id: KIT-UNIT-011
+    title: claude 二进制识别：`.cmd` 壳和绝对路径也算，dsh 不算
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - internal
+      - claude
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/internal-claude.test.ts
+    assertions:
+      - claude 二进制识别：`.cmd` 壳和绝对路径也算，dsh 不算
+      - 一次性调用带上 --session-id，并登记为平台内部会话
+      - 已有 --session-id 时原样保留，不重复注入也不登记
+      - 活会话列举剔掉平台自己的分析子进程，保留用户窗口
+      - 一次性调用的入口标记：sdk-cli 不算用户窗口，cli / 空都算
+      - 只保留用户窗口：内存登记与一次性调用都要剔掉，认不出的不误杀
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/internal-claude.test.ts
+  - id: KIT-UNIT-012
+    title: extractJson：lark-cli 的缩进 JSON 按整段解析
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - json
+      - extract
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/json-extract.test.ts
+    assertions:
+      - extractJson：lark-cli 的缩进 JSON 按整段解析
+      - extractJson：NDJSON 仍取最后一个事件
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/json-extract.test.ts
+  - id: KIT-UNIT-013
+    title: 开窗闸门：同工作区 60 秒内只放一次（防连点开多窗）
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - open
+      - gate
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/open-gate.test.ts
+    assertions:
+      - 开窗闸门：同工作区 60 秒内只放一次（防连点开多窗）
+      - 开窗闸门：不同工作区、不同模式互不影响
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/open-gate.test.ts
+  - id: KIT-UNIT-014
+    title: 在场采样脚本：here-string 必须顶格（缩进会让整段 PowerShell 解析失败）
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - presence
+      - sampler
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/presence-sampler.test.ts
+    assertions:
+      - 在场采样脚本：here-string 必须顶格（缩进会让整段 PowerShell 解析失败）
+      - 在场采样：真跑一次 PowerShell，写出 idleMs 与时间戳
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/presence-sampler.test.ts
+  - id: KIT-UNIT-015
+    title: 订阅没配（code=2）：固定 60 秒一次，别刷屏
+    layer: unit
+    priority: P2
+    tags:
+      - plugin-kit
+      - restart
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/restart.test.ts
+    assertions:
+      - 订阅没配（code=2）：固定 60 秒一次，别刷屏
+      - 普通异常：5 秒起，翻倍，封顶 60 秒
+      - 退出原因讲人话：code=2 直说缺什么订阅
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/restart.test.ts
+  - id: KIT-UNIT-016
+    title: renderResumeCard：恢复与接入用不同的回调 k
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - shared
+      - cards
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/shared-cards.test.ts
+    assertions:
+      - renderResumeCard：恢复与接入用不同的回调 k
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/shared-cards.test.ts
+  - id: KIT-UNIT-017
+    title: spawnLines：不传 input 时 stdin 保持打开，lark-cli 不会因 EOF 退出
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - spawn
+      - lines
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/spawn-lines.test.ts
+    assertions:
+      - spawnLines：不传 input 时 stdin 保持打开，lark-cli 不会因 EOF 退出
+      - spawnLines：传 input 时写完即关闭 stdin
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/spawn-lines.test.ts
+  - id: KIT-UNIT-018
+    title: Windows 上 npm 全局壳要解析成真实目标，否则 spawn 直接 ENOENT
+    layer: unit
+    priority: P1
+    tags:
+      - plugin-kit
+      - spawn
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/plugin-kit/spawn.test.ts
+    assertions:
+      - Windows 上 npm 全局壳要解析成真实目标，否则 spawn 直接 ENOENT
+      - 解析出的命令真能跑（不是只解析得对）
+      - 壳的形状：指向 exe 的直接用 exe，指向 js 的用当前 node
+    timeoutSec: 60
+    file: tests/specs/plugin-kit/spawn.test.ts

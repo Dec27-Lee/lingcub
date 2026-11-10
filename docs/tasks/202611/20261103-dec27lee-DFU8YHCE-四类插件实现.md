@@ -8,7 +8,7 @@
 - **更新时间**：2026-11-03 17:40:00
 - **相关材料**：
   - [任务索引](../INDEX.md)
-  - [插件契约](../../002-plugin-contract.md)｜[执行器](../../004-executors.md)
+  - [插件契约](../../design/plugin-contract.md)｜[执行器](../../runtime/executors.md)
 
 ## 结论摘要
 

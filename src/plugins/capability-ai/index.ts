@@ -10,8 +10,8 @@ import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { ManifestV2, PluginContextV2 } from '../../domain/plugin-v2.ts'
 import { extractJson } from '../../plugin-kit/json.ts'
+import { runClaudeOnce } from '../../plugin-kit/internal-claude.ts'
 import { stripDwsMediaNotice } from '../../plugin-kit/dingtalk-text.ts'
-import { runOnce } from '../../plugin-kit/spawn.ts'
 
 const EventInput = z.object({
   id: z.string(),
@@ -30,6 +30,14 @@ const HistoryInput = z.object({
   text: z.string(),
 })
 
+/** 同一会话此前几条消息的分析结论：给模型「我已经判断过什么」，它才写得出推进/重复。 */
+const PriorAnalysisInput = z.object({
+  at: z.string(),
+  summary: z.string(),
+  points: z.array(z.string()).optional(),
+  urgency: z.enum(['low', 'normal', 'high']).optional(),
+})
+
 const ConfigSchema = z
   .object({
     binary: z.string().default('claude'),
@@ -37,7 +45,7 @@ const ConfigSchema = z
     args: z.array(z.string()).default(['-p', '--output-format', 'text']),
     prompt: z.string().default('prompts/summarize.md'),
     timeoutMs: z.number().int().positive().default(90_000),
-    maxChars: z.number().int().positive().default(80),
+    maxChars: z.number().int().positive().default(120),
   })
   .strict()
 
@@ -56,7 +64,12 @@ function hhmm(iso: string): string {
   return `${parts.find((p) => p.type === 'hour')?.value ?? ''}:${parts.find((p) => p.type === 'minute')?.value ?? ''}`
 }
 
-export function buildSummaryTask(event: z.infer<typeof EventInput>, history: HistoryItem[], persona: string): string {
+export function buildSummaryTask(
+  event: z.infer<typeof EventInput>,
+  history: HistoryItem[],
+  persona: string,
+  priorAnalyses: z.infer<typeof PriorAnalysisInput>[] = [],
+): string {
   const lines = history.map(
     (h) => `[${hhmm(h.occurredAt)}] ${h.actor.name ?? h.actor.id}：${stripDwsMediaNotice(h.text) || '（空）'}`,
   )
@@ -66,6 +79,16 @@ export function buildSummaryTask(event: z.infer<typeof EventInput>, history: His
     '## 同一会话的最近聊天记录（从旧到新）',
     ...(lines.length ? lines : ['（没有历史消息）']),
     '',
+    ...(priorAnalyses.length
+      ? [
+          '## 这个会话此前几条消息的分析结论（从旧到新，供你判断是否在推进/重复）',
+          ...priorAnalyses.map(
+            (p) =>
+              `- [${hhmm(p.at)}] ${p.summary}${p.points?.length ? `（要点：${p.points.join('；')}）` : ''}${p.urgency ? `（${p.urgency}）` : ''}`,
+          ),
+          '',
+        ]
+      : []),
     '## 当前消息',
     `发送人：${event.actor.name ?? event.actor.id}`,
     `会话：${event.channel.kind} ${event.channel.name ?? event.channel.id}`,
@@ -76,9 +99,17 @@ export function buildSummaryTask(event: z.infer<typeof EventInput>, history: His
 
 const AnalysisOutput = z.object({
   summary: z.string().min(1),
+  points: z.array(z.string().min(1)).max(5).optional(),
+  need: z.string().optional(),
+  context: z.string().optional(),
   urgency: z.enum(['low', 'normal', 'high']).optional(),
   entities: z.array(z.string().min(1)).max(5).optional(),
 })
+
+const clipText = (s: string, max: number): string => {
+  const t = s.replace(/\s+/g, ' ').trim()
+  return t.length > max ? `${t.slice(0, max)}…` : t
+}
 
 export function parseSummary(stdout: string, maxChars = 80): string | undefined {
   const raw = extractJson(stdout)
@@ -91,13 +122,26 @@ export function parseSummary(stdout: string, maxChars = 80): string | undefined 
 
 export function parseAnalysis(
   stdout: string,
-  maxChars = 80,
-): { summary: string; urgency?: 'low' | 'normal' | 'high'; entities?: string[] } | undefined {
+  maxChars = 120,
+): {
+  summary: string
+  points?: string[]
+  need?: string
+  context?: string
+  urgency?: 'low' | 'normal' | 'high'
+  entities?: string[]
+} | undefined {
   const summary = parseSummary(stdout, maxChars)
   const parsed = AnalysisOutput.safeParse(extractJson(stdout))
   if (!summary || !parsed.success) return undefined
+  const points = parsed.data.points?.map((x) => clipText(x, 60)).filter(Boolean)
+  const need = parsed.data.need ? clipText(parsed.data.need, 60) : undefined
+  const context = parsed.data.context ? clipText(parsed.data.context, 40) : undefined
   return {
     summary,
+    ...(points?.length ? { points } : {}),
+    ...(need ? { need } : {}),
+    ...(context ? { context } : {}),
     urgency: parsed.data.urgency,
     entities: parsed.data.entities,
   }
@@ -121,9 +165,13 @@ export function setup(ctx: PluginContextV2): void {
       input: z.object({
         event: EventInput,
         history: z.array(HistoryInput).default([]),
+        priorAnalyses: z.array(PriorAnalysisInput).default([]),
       }),
       output: z.object({
         summary: z.string(),
+        points: z.array(z.string()).optional(),
+        need: z.string().optional(),
+        context: z.string().optional(),
         urgency: z.enum(['low', 'normal', 'high']).optional(),
         entities: z.array(z.string()).optional(),
         model: z.string(),
@@ -132,12 +180,15 @@ export function setup(ctx: PluginContextV2): void {
     },
     async (input) => {
       persona ||= readFileSync(resolve(cfg.prompt), 'utf8')
-      const task = buildSummaryTask(input.event, input.history ?? [], persona)
-      const r = await runOnce({
+      const task = buildSummaryTask(input.event, input.history ?? [], persona, input.priorAnalyses ?? [])
+      // 走 runClaudeOnce：给这次调用带上 `--session-id` 并登记成平台内部会话，
+      // 否则它会被执行器当成「用户开的终端窗口」接进飞书。
+      const r = await runClaudeOnce({
         binary: cfg.binary,
         args: cfg.args,
         input: task,
         timeoutMs: cfg.timeoutMs,
+        purpose: 'analyze',
       })
       if (r.code !== 0) {
         throw new Error(`摘要模型退出码 ${r.code ?? 'null'}：${r.stderr.trim().slice(0, 300)}`)

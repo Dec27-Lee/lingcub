@@ -1,0 +1,98 @@
+# domain 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: domain
+domain: domain
+scenarios:
+  - id: DOMAIN-UNIT-001
+    title: 卡片回调归一：解析按钮值、保留原始字符串
+    layer: unit
+    priority: P1
+    tags:
+      - domain
+      - card
+      - action
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/domain/card-action.test.ts
+    assertions:
+      - 卡片回调归一：解析按钮值、保留原始字符串
+      - 卡片回调归一：缺 action_value / type / 非法 JSON 都返回 null
+      - source-feishu-card：Event 仍是旧形状（text 为原始 action_value）
+    timeoutSec: 60
+    file: tests/specs/domain/card-action.test.ts
+  - id: DOMAIN-UNIT-002
+    title: 文档待办：解析与渲染往返
+    layer: unit
+    priority: P1
+    tags:
+      - domain
+      - doc
+      - todos
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/domain/doc-todos.test.ts
+    assertions:
+      - 文档待办：解析与渲染往返
+      - 文档待办：认领冲突/已完成/不存在/幂等
+      - 文档待办：合并保留已有 owner、完成态取或
+      - 文档待办：拆分按句读、去重、超长硬切
+    timeoutSec: 60
+    file: tests/specs/domain/doc-todos.test.ts
+  - id: DOMAIN-UNIT-003
+    title: doc-write：取小节正文，不跨到下一个标题
+    layer: unit
+    priority: P1
+    tags:
+      - domain
+      - doc
+      - write
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/domain/doc-write.test.ts
+    assertions:
+      - doc-write：取小节正文，不跨到下一个标题
+      - doc-write：版本与指纹一致时只替换自己小节
+      - doc-write：版本或指纹不一致即冲突，不写
+    timeoutSec: 60
+    file: tests/specs/domain/doc-write.test.ts
+  - id: DOMAIN-UNIT-004
+    title: doc-xml：按标签开闭扫描，记录带 id 的块与父子关系
+    layer: unit
+    priority: P1
+    tags:
+      - domain
+      - doc
+      - xml
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/domain/doc-xml.test.ts
+    assertions:
+      - doc-xml：按标签开闭扫描，记录带 id 的块与父子关系
+      - doc-xml：自闭合标签不进栈，后面仍是同层兄弟
+      - doc-xml：属性里的 `>` 不截断标签，后续块照常解析
+      - doc-xml：嵌套 grid/column 里 depth 与父块按最近 id 祖先算
+      - doc-xml：找小节——终点是下一个标题之前的最后一个块
+      - doc-xml：没有下一个标题时取父节点最后一个块；单块小节终点是自己
+      - doc-xml：小节不跨父节点（列内标题取列内最后一块）
+      - doc-xml：标题按可见文本匹配（去内联标签与实体），找不到返回 null
+      - doc-xml：标题按任意 level 截断（h2 也终止 h3 小节）
+      - doc-xml：渲染小节——checkbox / 合并 ul / 空段落 / 转义
+      - doc-xml：列表与 checkbox 交替时 ul 成对闭合
+      - doc-xml：首尾空行不产出空段落，空正文只有标题
+    timeoutSec: 60
+    notes: 另有 1 条断言见用例文件
+    file: tests/specs/domain/doc-xml.test.ts
+  - id: DOMAIN-UNIT-005
+    title: 工作站快照：会话/工作/发件箱按状态计数
+    layer: unit
+    priority: P1
+    tags:
+      - domain
+      - workstation
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/domain/workstation.test.ts
+    assertions:
+      - 工作站快照：会话/工作/发件箱按状态计数
+    timeoutSec: 60
+    file: tests/specs/domain/workstation.test.ts

@@ -24,6 +24,7 @@ export const manifest: ManifestV2 = {
   wants: [
     'ai.summarize',
     'state.history.fetch',
+    'state.analysis.recent',
     'state.analysis.degraded',
     'state.analysis.backlog',
     'state.analysis.old',
@@ -143,6 +144,7 @@ export function setup(ctx: PluginContextV2): void {
       }
 
       let history: HistoryItem[] = []
+      let priorAnalyses: { at: string; summary: string; points?: string[]; urgency?: MessageAnalysis['urgency'] }[] = []
       let contextVia: MessageAnalysis['contextVia']
       await acquire()
       try {
@@ -168,20 +170,42 @@ export function setup(ctx: PluginContextV2): void {
         } catch (err) {
           ctx.log('warn', `读取会话历史失败 ${event.channel.id}：${err instanceof Error ? err.message : String(err)}`)
         }
+        // 这个会话此前几条的结论：模型据此判断「在推进 / 又重复了一遍」，不是重新读一遍原文
+        if (ctx.has('state.analysis.recent')) {
+          try {
+            const prior = await ctx.call<{
+              items: { at: string; summary: string; points?: string[]; urgency?: MessageAnalysis['urgency'] }[]
+            }>('state.analysis.recent', {
+              channelId: event.channel.id,
+              before: event.receivedAt,
+              limit: 5,
+            })
+            priorAnalyses = prior.items
+          } catch (err) {
+            ctx.log('warn', `读取此前分析失败 ${event.channel.id}：${err instanceof Error ? err.message : String(err)}`)
+          }
+        }
         const result = await ctx.call<{
           summary: string
+          points?: string[]
+          need?: string
+          context?: string
           urgency?: 'low' | 'normal' | 'high'
           entities?: string[]
           model: string
         }>('ai.summarize', {
           event,
           history,
+          priorAnalyses,
         })
         emitAnalysis(event, {
           eventId: event.id,
           attempt,
           origin,
           summary: result.summary,
+          ...(result.points?.length ? { points: result.points } : {}),
+          ...(result.need ? { need: result.need } : {}),
+          ...(result.context ? { context: result.context } : {}),
           urgency: result.urgency,
           entities: result.entities,
           status: 'ok',

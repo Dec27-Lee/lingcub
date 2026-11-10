@@ -3,3 +3,6 @@ dist/
 data/
 *.log
 .env
+.tmp/
+tests/out/
+tests/.runtime/

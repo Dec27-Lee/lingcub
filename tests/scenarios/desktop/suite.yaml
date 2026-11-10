@@ -1,0 +1,105 @@
+# desktop 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: desktop
+domain: desktop
+scenarios:
+  - id: DESK-UNIT-001
+    title: 桌面壳：占位符与固定菜单区存在
+    layer: unit
+    priority: P1
+    tags:
+      - desktop
+      - page
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/desktop/desktop-page.test.ts
+    assertions:
+      - 桌面壳：占位符与固定菜单区存在
+      - 桌面壳：iframe 插槽不携带宿主令牌并启用 sandbox
+    timeoutSec: 60
+    file: tests/specs/desktop/desktop-page.test.ts
+  - id: DESK-E2E-002
+    title: 插件台账：v1/v2 都扫，启用状态与配置一致
+    layer: e2e
+    priority: P1
+    tags:
+      - desktop
+      - plugins
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/desktop/desktop-plugins.test.ts
+    assertions:
+      - 插件台账：v1/v2 都扫，启用状态与配置一致
+      - 面板：/api/plugins 返回清单，toggle 未知插件不 500
+    timeoutSec: 120
+    file: tests/specs/desktop/desktop-plugins.test.ts
+  - id: DESK-E2E-003
+    title: 登记文件：写入能读回，字段不全时视为没有
+    layer: e2e
+    priority: P1
+    tags:
+      - desktop
+      - registry
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/desktop/desktop-registry.test.ts
+    assertions:
+      - 登记文件：写入能读回，字段不全时视为没有
+      - 只有进程还活着才算在跑；陈旧登记会被忽略
+      - 清理只删自己写的登记
+      - 面板启动后写登记、关闭后删登记（入口复用的依据）
+    timeoutSec: 120
+    file: tests/specs/desktop/desktop-registry.test.ts
+  - id: DESK-E2E-004
+    title: 面板：工作站区块与 /api/workstation 可用
+    layer: e2e
+    priority: P1
+    tags:
+      - desktop
+      - workstation
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/desktop/desktop-workstation.test.ts
+    assertions:
+      - 面板：工作站区块与 /api/workstation 可用
+    timeoutSec: 120
+    file: tests/specs/desktop/desktop-workstation.test.ts
+  - id: DESK-E2E-005
+    title: 单实例锁：第二个进程被拒，释放后可再拿
+    layer: e2e
+    priority: P1
+    tags:
+      - desktop
+      - runtime
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/desktop/runtime.test.ts
+    assertions:
+      - 单实例锁：第二个进程被拒，释放后可再拿
+      - 单实例锁：陈旧锁（进程已不在）会被接管
+      - 常驻主循环：没有来源也能跑起来，收到停止信号后优雅退出且释放锁
+      - 常驻主循环：两个实例不能同时跑
+      - 桌面面板：写配置只落覆盖层，基线 YAML 不动
+      - 桌面面板：无令牌 403，有令牌能拿到真实状态
+      - 桌面面板：首页只在带令牌时可访问
+      - 保存并重启：请求文件出现后优雅退出，退出码标记「要重启」
+      - 面板：保存配置失败时不写重启请求（校验不过就不重启）
+      - 场景控制权：runtime 装配前按 control.* 过滤 console
+    timeoutSec: 120
+    file: tests/specs/desktop/runtime.test.ts
+  - id: DESK-UNIT-006
+    title: UI 目录：只收启用插件的 nav/slot
+    layer: unit
+    priority: P1
+    tags:
+      - desktop
+      - ui
+      - catalog
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/desktop/ui-catalog.test.ts
+    assertions:
+      - UI 目录：只收启用插件的 nav/slot
+      - UI 目录：路径穿越和未启用插件不暴露
+    timeoutSec: 60
+    file: tests/specs/desktop/ui-catalog.test.ts

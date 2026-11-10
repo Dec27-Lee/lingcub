@@ -41,6 +41,13 @@ export const manifest: ManifestV2 = {
   owns: ['status', 'stop', 'new'],
   config: z
     .object({
+      /**
+       * 只处理这些来源的消息：控制台发卡/回话固定走飞书频道（chatId、messageId 都是飞书的），
+       * 用钉钉的 id 发过去必被拒、在发件箱里积成死信。填真实 source id，不是渠道名。
+       */
+      sources: z
+        .array(z.string())
+        .default(['source-feishu-im', 'source-feishu-card', 'source-feishu-card-v2']),
       commands: z.array(z.string()).default(['#status', '#状态']),
       stopCommands: z.array(z.string()).default(['#stop', '#停']),
       newCommands: z.array(z.string()).default(['#new', '#新窗口']),
@@ -73,6 +80,7 @@ export const manifest: ManifestV2 = {
 
 export function setup(ctx: PluginContextV2): void {
   const cfg = ctx.config as {
+    sources: string[]
     commands: string[]
     stopCommands: string[]
     newCommands: string[]
@@ -89,6 +97,12 @@ export function setup(ctx: PluginContextV2): void {
 
   ctx.on('message.received', async (e) => {
     const event = e.payload as Event
+    // 所有分支（开窗向导与各条命令）都只认飞书来源：发送侧只有飞书频道，
+    // 把钉钉的 chatId/messageId 当飞书 id 用会被平台拒掉。
+    if (!cfg.sources.includes(event.source)) {
+      ctx.log('info', `非飞书来源（${event.source}），控制台不处理：${event.id}`)
+      return
+    }
     const text = event.text.trim()
     const isStatus = cfg.commands.includes(text)
     const isStop = cfg.stopCommands.includes(text)

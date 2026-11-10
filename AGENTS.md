@@ -10,8 +10,10 @@
 | `AGENTS.md`（本文件） | 维护者（AI） | 技术概览、开发规范、维护约束、文档分工 |
 | `CHANGELOG.md` | 使用者 | 版本变化 |
 | `docs/README.md` | 维护者 | 按任务选择入口的路由表 + 各份文档分别写什么 |
-| `docs/000`–`005` | 维护者 | 设计正文 |
-| `docs/006-platform-contracts.md` | 维护者 | 平台实测事实：飞书／钉钉／claude 命令与载荷、子进程壳解析 |
+| `docs/design/` | 维护者 | 设计正文：原则、领域模型、插件契约、路由 |
+| `docs/runtime/` | 维护者 | 执行器与会话窗口：claude / dsh 怎么跑、窗口与三端 |
+| `docs/platform/` | 维护者 | 平台实测事实：飞书／钉钉／claude／CC Switch／子进程壳解析 |
+| `docs/reference/` | 维护者 | 同类项目参考台账、交接提示词 |
 | `docs/tasks/` | 维护者 | 任务台账，过程记录 |
 
 **写新内容前先判断它属于哪一格**，不要往本文件继续堆——它只放「维护者必须知道的公共约束」。
@@ -19,11 +21,11 @@
 
 ## 起手必读（按序）
 
-1. `docs/000-principles.md` — 不可违反的五条
-2. `docs/001-domain.md` — Event / Intent / Action / Work 四层
-3. `docs/002-plugin-contract.md` — 加插件只改这里
-4. `docs/003-routing.md` — 判断与分派
-5. `docs/004-executors.md` — claude / dsh 两种执行器与工作区门禁
+1. `docs/design/principles.md` — 不可违反的五条
+2. `docs/design/domain-model.md` — Event / Intent / Action / Work 四层
+3. `docs/design/plugin-contract.md` — 加插件只改这里
+4. `docs/design/routing.md` — 判断与分派
+5. `docs/runtime/executors.md` — claude / dsh 两种执行器与工作区门禁
 
 ## 任务台账（接到任务的第一件事）
 
@@ -43,14 +45,18 @@
 - 内核（`src/kernel`、`src/domain`、`src/routing`）不 import 任何 `src/plugins/*`。
 - 插件之间不互相调用，一律经端口或 outbox；共用代码放 `src/plugin-kit/`（不参与插件发现）。
 - 所有对外副作用（起会话、发消息、写文档）必须经 `kernel/outbox`。
-- 新增能力优先加插件目录，不改内核；内核要改，先在 `docs/000` 里说明理由。
+- 新增能力优先加插件目录，不改内核；内核要改，先在 `docs/design/principles.md` 里说明理由。
 - 配置改动只落在 `config/*.yaml`，不写死在代码里。
 - 命令与参数属于平台事实，写成 `config/*.yaml` 里的模板（`{{占位符}}`），不写死在插件里。
+- **改 `~/.claude/settings.json`（装钩子）必须同步 CC Switch**：它切服务商时用库里的配置
+  整体覆盖 `settings.json`，漏一个服务商就等于「换个模型功能全丢」。装了才做，
+  `lingcub hook install` 默认会同步、`lingcub doctor` 会报差异，细节与两条硬约束见
+  [`docs/platform/contracts.md`](docs/platform/contracts.md)。
 
 ## 平台契约（实测，别照平台文档猜）
 
 飞书、钉钉、claude 的命令与载荷、Windows 子进程的壳解析，全是本机实测得来的事实。
-**改任何调用前先读 [`docs/006-platform-contracts.md`](docs/006-platform-contracts.md)**，不要照平台文档猜；
+**改任何调用前先读 [`docs/platform/contracts.md`](docs/platform/contracts.md)**，不要照平台文档猜；
 发现新的平台事实也写回那份文档，不写进本文件。
 
 ## 版本与变更日志
@@ -74,4 +80,9 @@
 - 任何会动生产状态的脚本都必须有第二道闸（`--apply` 之外再加显式确认变量）。
 
 改完跑 `pnpm build && pnpm test`。测试用 `node --test`，不引入测试框架。
+测试目录与规范见 [`tests/README.md`](tests/README.md)：新增用例必须登记 `tests/scenarios/<域>/suite.yaml`，
+`pnpm test:check` 会拦「只加用例不登记」。
+执行范围：开发中定向跑（`pnpm test:suite --suite=<域>`／`--case=<ID>`）；改 `src/kernel`、`src/routing`、
+`src/plugin-kit`、`src/domain/{ports,types,plugin-v2}.ts`、`config/*.yaml`、`tests/support/` 必须全量。
+全量 612 条约 18s，同步跑即可，不需要后台。`--check` 只验登记，不等于跑过。
 任务台账的验证口径与事实源见 `docs/tasks/README.md` 第 5 节。

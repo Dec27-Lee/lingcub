@@ -16,6 +16,7 @@ import { runOnce } from '../../plugin-kit/spawn.ts'
 import { assertNoPlaceholders, renderArgs } from '../../plugin-kit/template.ts'
 import {
   renderCard,
+  renderHereNoticeCard,
   renderPermissionCard,
   renderPickerCard,
   renderQuestionCard,
@@ -111,6 +112,18 @@ export const manifest = {
      */
     dryRun: z.boolean().default(false),
     pinCreateArgs: z.array(z.string()).default(['im', 'pins', 'create', '--as', 'bot', '--data', '{"message_id":"{{messageId}}"}']),
+    /** 对账用：列这个会话的置顶（翻页 token 由代码追加，空页不传） */
+    pinListArgs: z.array(z.string()).default([
+      'im',
+      'pins',
+      'list',
+      '--as',
+      'bot',
+      '--chat-id',
+      '{{chatId}}',
+      '--page-size',
+      '50',
+    ]),
     // 实测：pins delete 属于 high-risk-write，必须带 --yes，否则 CLI 直接拒绝
     pinDeleteArgs: z.array(z.string()).default([
       'im',
@@ -160,6 +173,7 @@ function renderAnyCard(card: unknown): unknown {
   if (kind === 'resume') return renderResumeCard(card as never)
   if (kind === 'question') return renderQuestionCard(card as never)
   if (kind === 'permission') return renderPermissionCard(card as never)
+  if (kind === 'here-notice') return renderHereNoticeCard(card as never)
   if (kind === 'settled') return renderSettledCard(card as never)
   if (kind === 'notice') return renderNoticeCard(card as never)
   if (kind === 'ready') return renderReadyCard(card as never)
@@ -220,7 +234,12 @@ export function setup(ctx: PluginContext<typeof manifest>): void {
       const r = await runOnce({ binary: cfg.binary, args, timeoutMs: cfg.timeoutMs })
       if (r.code !== 0) throw new Error(`发卡失败（exit=${r.code}）：${r.stderr.trim().slice(0, 300)}`)
       const messageId = pickMessageId(r.stdout, cfg.messageIdPath)
-      if (a.pin && cfg.pinCards && messageId) {
+      // 拿不到 id 就明确失败：卡已经发出去了，但没有 id 就没法原地更新、没法置顶、
+      // 话题也绑不上——静默返回 sent 等于把「这张卡以后永远是死的」记成成功。
+      if (!messageId) {
+        throw new Error(`发卡成功但没解析到消息 id（检查 messageIdPath）：${r.stdout.trim().slice(0, 200)}`)
+      }
+      if (a.pin && cfg.pinCards) {
         // 置顶失败不该打挂发卡，最多提示一句
         await channel.pinMessage?.(messageId, true).catch((e: unknown) =>
           ctx.log('warn', `置顶失败（不影响发卡）：${e instanceof Error ? e.message : String(e)}`),
@@ -309,6 +328,33 @@ export function setup(ctx: PluginContext<typeof manifest>): void {
       } catch {
         return undefined
       }
+    },
+
+    /** 群里的置顶列表：对账用，翻页到最后一页。 */
+    async listPins(chatId: string): Promise<{ messageId: string; operatorIdType?: string }[]> {
+      if (cfg.dryRun) return []
+      const out: { messageId: string; operatorIdType?: string }[] = []
+      let pageToken = ''
+      for (let page = 0; page < 10; page++) {
+        const args = renderArgs(cfg.pinListArgs, { chatId })
+        if (pageToken) args.push('--page-token', pageToken)
+        assertNoPlaceholders(args)
+        const r = await runOnce({ binary: cfg.binary, args, timeoutMs: cfg.timeoutMs })
+        if (r.code !== 0) throw new Error(`读置顶列表失败（exit=${r.code}）：${r.stderr.trim().slice(0, 200)}`)
+        const j = JSON.parse(r.stdout) as {
+          data?: {
+            items?: { message_id?: string; operator_id_type?: string }[]
+            has_more?: boolean
+            page_token?: string
+          }
+        }
+        for (const it of j.data?.items ?? []) {
+          if (it.message_id) out.push({ messageId: it.message_id, operatorIdType: it.operator_id_type })
+        }
+        if (!j.data?.has_more || !j.data.page_token) break
+        pageToken = j.data.page_token
+      }
+      return out
     },
 
     async downloadImage(a): Promise<string> {

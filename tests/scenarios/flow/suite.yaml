@@ -1,0 +1,214 @@
+# flow 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: flow
+domain: flow
+scenarios:
+  - id: FLOW-INT-001
+    title: dsh 活会话会被采纳：executor=dsh、source=source-local-dsh，卡片当话题根并置顶
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - adopt
+      - local
+      - windows
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/adopt-local-windows.test.ts
+    assertions:
+      - dsh 活会话会被采纳：executor=dsh、source=source-local-dsh，卡片当话题根并置顶
+      - claude 行为不变：executor=claude、source=source-local-claude
+      - adoptPerRun 对两种执行器合计生效：上限 1 时一轮只接 1 个，下一轮再接另一个
+      - 已存在的 dsh 会话被标过 dead：窗口还活着就复活成 active
+      - 配置里只有 claude 时不影响采纳（没配 dsh 策略不该把这一轮打挂）
+      - session 头判定：子代理/编排会话不是用户窗口，判定不出来也不采纳
+      - dsh listLiveSessions 剔除子代理会话，读不出头的也不采纳
+      - 会话短 id：dsh 的 session- 前缀不能把 id 吃掉（否则所有 dsh 窗口撞成一个）
+    timeoutSec: 60
+    file: tests/specs/flow/adopt-local-windows.test.ts
+  - id: FLOW-INT-002
+    title: 入口单消费者：bus 模式 Pipeline 只落库，场景派工一次
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - bus
+      - entry
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/bus-entry.test.ts
+    assertions:
+      - 入口单消费者：bus 模式 Pipeline 只落库，场景派工一次
+    timeoutSec: 60
+    file: tests/specs/flow/bus-entry.test.ts
+  - id: FLOW-INT-003
+    title: 待办场景装配：启用后消息进总线，回执带待办列表
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - doc
+      - todos
+      - assembly
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/doc-todos-assembly.test.ts
+    assertions:
+      - 待办场景装配：启用后消息进总线，回执带待办列表
+    timeoutSec: 60
+    file: tests/specs/flow/doc-todos-assembly.test.ts
+  - id: FLOW-INT-004
+    title: doc.write：内核比对后经 DocPort 只替换小节
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - doc
+      - write
+      - e2e
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/doc-write-e2e.test.ts
+    assertions:
+      - doc.write：内核比对后经 DocPort 只替换小节
+      - doc.write：端口提供 writeSection 时走块级替换，不整篇读写
+    timeoutSec: 60
+    file: tests/specs/flow/doc-write-e2e.test.ts
+  - id: FLOW-INT-005
+    title: doc.write：能力 → 发件箱 → 插件 block_replace，XML 走 stdin
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - doc
+      - write
+      - plugin
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/doc-write-plugin-e2e.test.ts
+    assertions:
+      - doc.write：能力 → 发件箱 → 插件 block_replace，XML 走 stdin
+    timeoutSec: 60
+    file: tests/specs/flow/doc-write-plugin-e2e.test.ts
+  - id: FLOW-INT-006
+    title: 端到端（离线）：发任务 → 选执行器 → 选工作区 → 开窗 → 会话行 → 就绪卡
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - e2e
+      - session
+      - open
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/e2e-session-open.test.ts
+    assertions:
+      - 端到端（离线）：发任务 → 选执行器 → 选工作区 → 开窗 → 会话行 → 就绪卡
+    timeoutSec: 60
+    file: tests/specs/flow/e2e-session-open.test.ts
+  - id: FLOW-E2E-007
+    title: 端到端：群里说话 → 开窗 → 锚消息 → 状态卡 → 钩子回传
+    layer: e2e
+    priority: P0
+    tags:
+      - flow
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/e2e.test.ts
+    assertions:
+      - 端到端：群里说话 → 开窗 → 锚消息 → 状态卡 → 钩子回传
+      - 端到端：两个工作区 → 选择卡 → 点按钮 → 开窗 → 通知三行
+    timeoutSec: 120
+    file: tests/specs/flow/e2e.test.ts
+  - id: FLOW-INT-008
+    title: 飞书事件映射：扁平字段 → Event，毫秒时间戳转 ISO，atMe 留空不猜
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - plugins
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/plugins.test.ts
+    assertions:
+      - 飞书事件映射：扁平字段 → Event，毫秒时间戳转 ISO，atMe 留空不猜
+      - 私聊（p2p）映射为 dm
+      - 钉钉 +listen-im all-direct：没有 channelType 也按来源声明映射为 dm
+      - 缺字段时不静默：返回缺失清单与 payload 顶层键
+      - 时间戳兼容秒/毫秒/ISO，非法值回落到收到的时刻
+      - 分类输出解析：纯 JSON / 事件包裹 / 代码围栏都能取到
+      - 参数模板：占位替换，缺变量直接失败
+      - claude 执行器：第二道门禁拦住不在允许根内的工作区
+      - claude 执行器：没配预算就报错，不拿 0 当默认值
+      - dsh 执行器：真起子进程、收集进度、退出即完成
+      - 飞书频道：正文作为一段合法 JSON 传给 CLI（引号不破结构）
+      - 飞书频道：没配 chatId 就报错，不往空处发
+    timeoutSec: 60
+    notes: 另有 6 条断言见用例文件
+    file: tests/specs/flow/plugins.test.ts
+  - id: FLOW-INT-009
+    title: session.bind：改绑走发件箱，会话执行器 id 与工作区一起更新
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - session
+      - bind
+      - e2e
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/session-bind-e2e.test.ts
+    assertions:
+      - session.bind：改绑走发件箱，会话执行器 id 与工作区一起更新
+      - session.attach：无会话行时新建，已有话题时改绑
+    timeoutSec: 60
+    file: tests/specs/flow/session-bind-e2e.test.ts
+  - id: FLOW-INT-010
+    title: session.post：能力 → 发件箱 → 执行器 post，正文带信封
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - session
+      - post
+      - e2e
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/session-post-e2e.test.ts
+    assertions:
+      - session.post：能力 → 发件箱 → 执行器 post，正文带信封
+    timeoutSec: 60
+    file: tests/specs/flow/session-post-e2e.test.ts
+  - id: FLOW-INT-011
+    title: dsh 老会话被翻开写一行也不算新窗口：只有刚建的才接进飞书
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - adopt
+      - local
+      - dsh
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/adopt-local-windows.test.ts
+    assertions:
+      - dsh 老会话被翻开写一行也不算新窗口：只有刚建的才接进飞书
+    timeoutSec: 60
+    file: tests/specs/flow/adopt-local-windows.test.ts
+  - id: FLOW-INT-012
+    title: dsh 会话被扫到就刷新活跃时间：别因为「没说话」被标 idle 再撤掉置顶
+    layer: integration
+    priority: P1
+    tags:
+      - flow
+      - adopt
+      - local
+      - dsh
+      - pin
+      - integration
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/flow/adopt-local-windows.test.ts
+    assertions:
+      - dsh 会话被扫到就刷新活跃时间：别因为「没说话」被标 idle 再撤掉置顶
+    timeoutSec: 60
+    file: tests/specs/flow/adopt-local-windows.test.ts

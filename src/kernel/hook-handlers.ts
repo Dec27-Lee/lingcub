@@ -7,6 +7,7 @@ import type { HookPayload } from './hook-server.ts'
 import { dedupeKey } from './ids.ts'
 import { AUTO_REPLY_ENVELOPE, FEISHU_ENVELOPE } from './envelope.ts'
 import { currentTurn, findTranscript, lastUserInput, statsLine } from './transcript.ts'
+import { resolveContextWindow } from './context-window.ts'
 import { buildNoticeCard } from './notice-card.ts'
 import type { Outbox } from './outbox.ts'
 import type { Store } from './store.ts'
@@ -74,7 +75,7 @@ export function formatStopMessage(a: {
   const lines: string[] = []
   if (a.workspace) lines.push(`📁 \`${a.workspace}\``)
   lines.push(`🕐 ${(a.at ?? new Date()).toLocaleTimeString('zh-CN', { hour12: false })}`)
-  const stats = statsLine(a.transcript, a.contextWindow ?? 200_000)
+  const stats = statsLine(a.transcript, resolveContextWindow(a.contextWindow))
   if (stats) lines.push(`📦 ${stats}`)
 
   const said = a.transcript ? lastUserInput(a.transcript) : null
@@ -85,13 +86,6 @@ export function formatStopMessage(a: {
   lines.push('——')
   lines.push(formatStopText(a.payload))
   return lines.join('\n')
-}
-
-function firstLine(p: HookPayload): string {
-  const text = (p.last_assistant_message ?? '').trim()
-  if (!text) return '（这一轮没有输出）'
-  const line = text.split('\n').find((l) => l.trim()) ?? '（没有正文）'
-  return line.length > 120 ? line.slice(0, 120) + '…' : line
 }
 
 /** 通知类型 → 标题（参考项目按 notification_type 分派） */
@@ -176,10 +170,12 @@ export function createHookHandlers(deps: {
       // 再是「你在终端里说」，再 hr，再正文。
       const transcript = findTranscript(session.sessionId ?? p.session_id)
       const at = new Date()
-      const stats = statsLine(transcript, deps.contextWindow ?? 200_000)
+      const stats = statsLine(transcript, resolveContextWindow(deps.contextWindow))
       const said = transcript ? lastUserInput(transcript) : null
       const body = formatStopText(p, transcript ?? undefined)
       const chunks = splitChunks(body, deps.chunkChars ?? 4000)
+      // 键落在「这一轮的正文」上：用 Date.now() 的话，钩子超时重试会再发一遍同样的卡。
+      const bodyKey = createHash('sha1').update(body).digest('hex').slice(0, 12)
       chunks.forEach((chunk, i) => {
         outbox.enqueue(
           {
@@ -199,7 +195,7 @@ export function createHookHandlers(deps: {
             }),
           },
           // 每轮一个键：同一条输出重复出现时不该被当成重复投递（至少一次，宁可偶尔重复）
-          dedupeKey(`${p.session_id}-${Date.now()}`, `hook-stop-${i}`),
+          dedupeKey(`${p.session_id}-${bodyKey}`, `hook-stop-${i}`),
           // 飞书同一用户 5 QPS：分段连发按 1 秒一段排开（参考项目同样 1000ms）
           { notBefore: Date.now() + i * (deps.chunkGapMs ?? 1000) },
         )
@@ -207,12 +203,13 @@ export function createHookHandlers(deps: {
       store.touchSession(session.id)
       // 记「这一轮结束了」+ 最后一句正文：自动回复策略要按它判「安静太久」
       store.markStopped(session.id, body)
-      // 参考项目：一轮结束就把状态卡「关掉」（灰化 + 撤置顶 + 从 cards 表删），
-      // 别让那张会自己变的卡留在话题里；回复卡已经先入了队，投递顺序由发件箱保证。
-      outbox.enqueue(
-        { kind: 'card_retire', sessionId: session.id },
-        dedupeKey(`${p.session_id}-${Date.now()}`, 'hook-card-retire'),
-      )
+      // 状态卡不撤也不删：它就是话题根，撤掉置顶等于让这个窗口从「Pin 消息」面板里消失。
+      // 只忘掉「这张卡画的是哪一轮」，下一拍原地重画成「已结束」。
+      store.clearCardTurn(session.id)
+      // 记「这一轮已经回过了」：`#refreshOneCard` 的兜底正是靠它判断「钩子丢没丢」，
+      // 不记的话同一轮还会被再补发一遍（2026-11-09 日志里 221 次「钩子没到」大半是这么来的）。
+      const turnId = transcript ? currentTurn(transcript).userId : undefined
+      if (turnId) store.markReplied(session.id, turnId)
       log('info', `钩子：会话 ${session.id} 的结果已入队`)
       try {
         // 把从转录取到的正文回填：下游（私聊摘要、结果回执）读的都是 last_assistant_message
@@ -251,14 +248,6 @@ export function createHookHandlers(deps: {
     async onNotify(p) {
       const session = findSession(p)
       if (!session) return
-      // 完整通知：目录/时间/用量 + 你在终端说的那句 + 这一轮的回复
-      const transcript = findTranscript(session.sessionId ?? p.session_id)
-      const full = formatStopMessage({
-        payload: p,
-        workspace: session.workspace,
-        transcript,
-        contextWindow: deps.contextWindow,
-      })
       // 2 分钟内已经推过待答记录（选择题 / 权限确认）→ 说明卡在路上了，别再喊一遍
       if (store.hasFreshPendingQuestion(session.id, 2 * 60_000)) {
         log('debug', `提醒卡跳过：${session.id} 2 分钟内已有待答记录`)

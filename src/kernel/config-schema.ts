@@ -39,13 +39,19 @@ const LABELS: Record<string, Label> = {
   'log.level': { label: '日志级别', kind: 'select', options: ['debug', 'info', 'warn', 'error'] },
   'store.path': { label: '数据库路径', kind: 'readonly', note: '改这个要重开程序' },
 
-  contextWindow: { label: '上下文窗口大小', kind: 'number', hint: 'tokens', note: '通知里用量那一行的分母' },
+  contextWindow: {
+    label: '上下文窗口大小',
+    kind: 'number',
+    hint: 'tokens',
+    note: '用量那一行的分母，仅作兜底：优先用 claude 自己声明的窗口；0 = 不知道，不画百分比',
+  },
 
   'cleanup.enabled': { label: '自动清理过期数据', kind: 'bool' },
   'cleanup.imageTtlDays': { label: '图片保留天数', kind: 'number', hint: '天' },
   'cleanup.mappingTtlDays': { label: '消息映射保留天数', kind: 'number', hint: '天' },
   'cleanup.questionTtlHours': { label: '未答提问保留小时', kind: 'number', hint: '小时' },
   'cleanup.maxLogBytes': { label: '单个日志上限', kind: 'number', hint: '字节' },
+  'cleanup.spawnTtlDays': { label: '一次性会话转录保留天数', kind: 'number', hint: '天' },
 
   'sessions.newTopicPolicy': {
     label: '群里新消息怎么处理',

@@ -591,6 +591,17 @@ function ensureTables(db: DatabaseSync): void {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS confirmations_status ON confirmations(status, id);
+
+    -- 我们自己发起的一次性调用（分析、分类）。session_id 是执行器给的唯一标识，
+    -- 也就是它在磁盘上的转录文件名：清理按 id 删，不靠内容匹配。
+    CREATE TABLE IF NOT EXISTS spawned_sessions (
+      session_id TEXT PRIMARY KEY,
+      executor   TEXT NOT NULL,
+      purpose    TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      purged_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS spawned_sessions_pending ON spawned_sessions(purged_at, created_at);
   `)
 
   // 轻量列迁移：works 的 via 只用于区分 event/pipeline 开窗，旧库补列即可。
@@ -1071,6 +1082,60 @@ export class Store {
       .run(now(), text, now(), sessionId)
   }
 
+  /**
+   * 记下「这次是我们自己发起的一次性调用」。
+   *
+   * `sessionId` 是执行器给的唯一标识（claude 是我们传进去的 `--session-id`，dsh 是输出首行回的那个），
+   * 它同时就是磁盘上的转录名字——所以清理只需要这个 id，不用猜内容。
+   */
+  recordSpawn(sessionId: string, executor: string, purpose: string, createdAt = now()): void {
+    if (!sessionId) return
+    this.#db
+      .prepare(
+        `INSERT OR IGNORE INTO spawned_sessions (session_id, executor, purpose, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(sessionId, executor, purpose, createdAt)
+  }
+
+  /** 该清的一次性会话：早于 cutoff 且还没清过。 */
+  listSpawnsToPurge(cutoffIso: string, limit = 1000): { sessionId: string; executor: string }[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT session_id AS sessionId, executor FROM spawned_sessions
+          WHERE purged_at IS NULL AND created_at < ?
+          ORDER BY created_at
+          LIMIT ?`,
+      )
+      .all(cutoffIso, limit) as unknown as { sessionId: string; executor: string }[]
+    return rows
+  }
+
+  /**
+   * 已到期、还没清掉的条数。
+   * 和 `countSpawns().pending`（所有没清过的）分开报：后者包含还在保留期内的，
+   * 混在一起看会以为下次清理要删掉那么多（2026-11-10 实测 353 vs 到期 4）。
+   */
+  countSpawnsDue(cutoffIso: string): number {
+    const row = this.#db
+      .prepare('SELECT COUNT(*) AS c FROM spawned_sessions WHERE purged_at IS NULL AND created_at < ?')
+      .get(cutoffIso) as { c?: number } | undefined
+    return Number(row?.c ?? 0)
+  }
+
+  /** 标成已清：文件本来就不在的也算（下次不必再查一遍）。 */
+  markSpawnPurged(sessionId: string): void {
+    this.#db.prepare('UPDATE spawned_sessions SET purged_at = ? WHERE session_id = ?').run(now(), sessionId)
+  }
+
+  /** 面板/自检用：一共记了多少、还有多少没清。 */
+  countSpawns(): { total: number; pending: number } {
+    const row = this.#db
+      .prepare('SELECT COUNT(*) AS total, SUM(CASE WHEN purged_at IS NULL THEN 1 ELSE 0 END) AS pending FROM spawned_sessions')
+      .get() as { total?: number; pending?: number } | undefined
+    return { total: Number(row?.total ?? 0), pending: Number(row?.pending ?? 0) }
+  }
+
   /** 自动回复的冷却：同一窗口这个间隔内最多自动回一次。 */
   canAutoReply(sessionId: string, cooldownMs: number): boolean {
     const row = this.#db
@@ -1132,6 +1197,9 @@ export class Store {
         'UPDATE sessions SET status = ?, session_id = COALESCE(?, session_id), last_active_at = ? WHERE id = ?',
       )
       .run(status, sessionId ?? null, now(), id)
+    // 回到 active 是「复活」（重启、短暂扫不到都会走到这）：旧卡画的轮次已经过去了，
+    // 不清掉 `card_turns` 的话 `#refreshOneCard` 会判定「这一轮画过了」而永远不重建卡。
+    if (status === 'active') this.clearCardTurn(id)
   }
 
   /** 记下「这条消息被投给了哪个会话」：回放时能区分直投与判断。 */
@@ -1374,6 +1442,16 @@ export class Store {
       .prepare('SELECT turn_id FROM card_turns WHERE session_id = ?')
       .get(sessionId) as { turn_id?: string | null } | undefined
     return row?.turn_id ?? undefined
+  }
+
+  /**
+   * 忘掉「这张卡画的是哪一轮」，让下一拍重新画。
+   *
+   * 一轮结束时必须清：否则 `#refreshOneCard` 认为这一轮已经画过，卡会一直停在
+   * 「正在运行」（钩子已经说过结束了）。复活时也清，理由同上。
+   */
+  clearCardTurn(sessionId: string): void {
+    this.#db.prepare('DELETE FROM card_turns WHERE session_id = ?').run(sessionId)
   }
 
   /** 删掉卡记录：下一次 upsert 会重新发一张（换卡）。 */
@@ -1807,6 +1885,41 @@ export class Store {
     if (!row) return null
     const payload = JSON.parse(row.payload) as { analysis?: MessageAnalysis }
     return payload.analysis ?? null
+  }
+
+  /**
+   * 同一会话此前几条消息的分析结论（旧 → 新）。
+   * 只取分析成功的：降级记录没有结论，喂回模型只会让它重复「上一次没分析出来」。
+   */
+  recentAnalyses(
+    channelId: string,
+    beforeIso: string | undefined,
+    limit = 5,
+  ): { at: string; summary: string; points?: string[]; urgency?: MessageAnalysis['urgency'] }[] {
+    const rows = this.#db
+      .prepare(
+        `SELECT at, payload FROM event_log
+         WHERE kind = 'message.analyzed' AND subject = ?
+           AND (? IS NULL OR at < ?)
+         ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(channelId, beforeIso ?? null, beforeIso ?? null, limit) as unknown as {
+      at: string
+      payload: string
+    }[]
+    const out: { at: string; summary: string; points?: string[]; urgency?: MessageAnalysis['urgency'] }[] = []
+    for (const row of rows) {
+      const p = JSON.parse(row.payload) as { analysis?: MessageAnalysis }
+      const a = p.analysis
+      if (!a || a.status !== 'ok' || !a.summary.trim()) continue
+      out.push({
+        at: row.at,
+        summary: a.summary,
+        ...(a.points?.length ? { points: a.points } : {}),
+        ...(a.urgency ? { urgency: a.urgency } : {}),
+      })
+    }
+    return out.reverse()
   }
 
   getEventLogAt(kind: string, seq: number): BusEvent | null {

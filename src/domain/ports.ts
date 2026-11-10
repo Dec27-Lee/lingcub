@@ -76,6 +76,11 @@ export interface DiscoveredSession {
   running: boolean
   /** 平台直接给出的忙闲（claude `agents --json` 有；dsh 只能推断，没把握就不填） */
   status?: 'busy' | 'idle'
+  /**
+   * 这个会话是什么时候建的（dsh 从转录头读；claude 没有）。
+   * 用来挡「翻旧会话」：dsh 只看「文件最近被写过」，把历史会话翻开写一行也会被当成新窗口。
+   */
+  createdAt?: number
 }
 
 export interface Executor {
@@ -130,6 +135,14 @@ export interface Channel {
   sendDm?(a: { userId: string; card: unknown }, dedupeKey: string): Promise<SendResult>
   /** 置顶/取消置顶（失败不该打挂主流程） */
   pinMessage?(messageId: string, pin: boolean): Promise<void>
+  /**
+   * 这个会话里当前有哪些置顶。
+   *
+   * 只靠本地卡片表对不出全部：一个窗口会有多张卡（每轮一张，收卡后下一轮另起），
+   * 表里只留最后一张，历史卡的置顶就成了没人认领的孤儿——用户看到「就两个窗口，置顶一大堆」。
+   * 所以对账要以平台返回的置顶列表为准。
+   */
+  listPins?(chatId: string): Promise<{ messageId: string; operatorIdType?: string }[]>
   /**
    * 这条消息是不是我们自己发的卡（用来判断「某个话题是不是我们开的窗口」）。
    * 不实现就当作「不知道」——内核会退回静默，不猜。

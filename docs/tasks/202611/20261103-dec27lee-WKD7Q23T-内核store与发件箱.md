@@ -8,7 +8,7 @@
 - **更新时间**：2026-11-03 17:18:13
 - **相关材料**：
   - [任务索引](../INDEX.md)
-  - [域模型](../../001-domain.md)｜[判断与分派](../../003-routing.md)
+  - [域模型](../../design/domain-model.md)｜[判断与分派](../../design/routing.md)
 
 ## 结论摘要
 
@@ -36,7 +36,7 @@ P1 完成。落 `kernel/store.ts`（`node:sqlite`，四表，`PRAGMA user_versio
 配套改动：
 
 - `src/domain/types.ts`：Event 增可选 `atMe`。理由：`atMe` 是平台侧事实、规则谓词直接依赖，
-  藏在 `raw` 里会让规则无法断言；已同步 `docs/001-domain.md`。
+  藏在 `raw` 里会让规则无法断言；已同步 `../../design/domain-model.md`。
 - `src/domain/ports.ts`：抽出 `Log` 类型，内核与插件共用一套日志签名。
 - `src/kernel/config.ts`：`assertValid` 导出复用，避免每个加载器各写一遍「一次性报全部问题」。
 - 模块解析：源码内相对导入改用 `.ts` 后缀 + `tsconfig` 打开

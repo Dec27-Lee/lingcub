@@ -10,8 +10,8 @@ import { resolve } from 'node:path'
 import { z } from 'zod'
 import type { Classifier, PluginContext } from '../../domain/ports.ts'
 import type { Intent, ProjectCandidate } from '../../domain/types.ts'
+import { runClaudeOnce } from '../../plugin-kit/internal-claude.ts'
 import { extractJson } from '../../plugin-kit/json.ts'
-import { runOnce } from '../../plugin-kit/spawn.ts'
 
 const IntentSchema = z.object({
   kind: z.enum(['dev-request', 'bug', 'question', 'chatter', 'doc-update', 'todo']),
@@ -61,11 +61,13 @@ export function setup(ctx: PluginContext<typeof manifest>): void {
         e.text.trim() || '(空)',
       ].join('\n')
 
-      const r = await runOnce({
+      // claude 分类调用同样是一次性会话：登记后不会被当成用户窗口
+      const r = await runClaudeOnce({
         binary: cfg.binary,
         args: cfg.args,
         input: task,
         timeoutMs: cfg.timeoutMs,
+        purpose: 'classify',
       })
       if (r.code !== 0) {
         ctx.log('warn', `分类调用退出码 ${r.code}：${r.stderr.trim().slice(0, 300)}`)

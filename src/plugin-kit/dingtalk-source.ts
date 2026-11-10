@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { HistoryItem, HistoryQuery, Log, Source } from '../domain/ports.ts'
 import type { ChannelKind, Event } from '../domain/types.ts'
 import { eventId } from '../domain/ids.ts'
-import { mapMessage, toIso, type MessageFields } from './map.ts'
+import { mapMessage, toIso } from './map.ts'
 import { runOnce, spawnLines, type LineProcess } from './spawn.ts'
 
 export const DingTalkFieldsSchema = z.object({

@@ -9,7 +9,9 @@
 > 命中已有任务时续接原任务 ID，只有确认不存在相关任务时才创建新任务。
 
 **文档分工**：`README.md` 给使用者，`AGENTS.md` 给维护者（规范与约束），
-[`../README.md`](../README.md) 是文档索引，`docs/000`–`004` 是设计，
+[`../README.md`](../README.md) 是文档索引；设计正文在 [`../design/`](../design/README.md)、
+执行器与会话窗口在 [`../runtime/`](../runtime/README.md)、平台实测事实在
+[`../platform/contracts.md`](../platform/contracts.md)、参考与交接在 [`../reference/`](../reference/README.md)；
 `CHANGELOG.md` 是版本日志。**任务过程写进本目录**，不要污染上面这几份长期文档。
 
 ---
@@ -125,10 +127,10 @@ docs/tasks/202611/20261103-dec27lee-WKD7Q23T-内核store与发件箱.md
 | [`../../README.md`](../../README.md) | 项目是什么、怎么开始用 |
 | [`../../AGENTS.md`](../../AGENTS.md) | 维护约束、开发规范、文档分工 |
 | [`../README.md`](../README.md) | `docs/` 各文档分别写什么 |
-| [`../000-principles.md`](../000-principles.md) | 五条原则与判断四层分工 |
-| [`../001-domain.md`](../001-domain.md) | Event / Intent / Work / Action 与不变式 |
-| [`../002-plugin-contract.md`](../002-plugin-contract.md) | 插件 manifest、四端口、生命周期 |
-| [`../003-routing.md`](../003-routing.md) | 三级漏斗、规则谓词、三档模式 |
-| [`../004-executors.md`](../004-executors.md) | 执行器能力对照、启动命令、工作区门禁 |
+| [`../../design/principles.md`](../design/principles.md) | 五条原则与判断四层分工 |
+| [`../../design/domain-model.md`](../design/domain-model.md) | Event / Intent / Work / Action 与不变式 |
+| [`../../design/plugin-contract.md`](../design/plugin-contract.md) | 插件 manifest、四端口、生命周期 |
+| [`../../design/routing.md`](../design/routing.md) | 三级漏斗、规则谓词、三档模式 |
+| [`../../runtime/executors.md`](../runtime/executors.md) | 执行器能力对照、启动命令、工作区门禁 |
 | [`../../CHANGELOG.md`](../../CHANGELOG.md) | 版本日志，写用户视角的变化 |
 | `pnpm build && pnpm test` | 验证依据的主要来源 |

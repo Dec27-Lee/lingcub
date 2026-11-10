@@ -129,6 +129,9 @@ cleanup:
   mappingTtlDays: 14       # 「引用这条消息能找回窗口」的映射保留 14 天
   questionTtlHours: 2      # 超时未答的提问记录
   maxLogBytes: 5242880     # 单个日志超过 5MB 只留尾部一半
+  # 我们自己发起的一次性会话（渠道分析、意图分类）每次都在 ~/.claude/projects 下留一个转录。
+  # 按记录过的会话 id 删，不按内容猜；你手动开的窗口 id 不在记录里，永远不会被删。
+  spawnTtlDays: 1
 
 sessions:
   # judge：群里的新消息照常判断；open：群里的新消息就是「开一个窗口」，正文当话题名。
@@ -137,7 +140,13 @@ sessions:
   choiceTtlMs: 1800000   # 等人选工作区的有效期（30 分钟）
   pickMax: 20            # 选择工作区时最多列几个（按最近活跃排序）
   resumeMax: 8           # 恢复会话时最多列几个
-  staleMinutes: 30       # 会话这么久没动静 = 窗口已经不在了：撤置顶（关窗没有事件可捕获）
+  # 预留：目前不参与任何判定。置顶只看窗口是否还开着，不按「多久没说话」判
+  # （按时间判会把「开着但没人说话」的窗口判死，2026-11-09 反复出过）。
+  staleMinutes: 30
+  # 状态卡原地刷新的最小间隔。别调太小：每次改卡/置顶都是一次 CLI 调用（要重新取 token），
+  # 2 秒一张 × 六七个窗口会把 token 接口打到超时，表现是「改卡失败→换新卡→置顶失败→置顶越来越少」。
+  cardRefreshMs: 15000
+  adoptNewMinutes: 10     # dsh 只接「这么新」的会话：老会话被翻开写一行也会命中「在跑」，不该当新窗口
 
 limits:
   maxConcurrentSessions: 2

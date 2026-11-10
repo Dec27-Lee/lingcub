@@ -117,6 +117,8 @@ export interface SessionHistory {
   running: boolean
   /** 平台/注册表给的忙闲；没有就不填 */
   status?: 'busy' | 'idle'
+  /** 转录里的入口标记：`cli` 用户终端，`sdk-cli` 一次性调用 */
+  entrypoint?: string
 }
 
 /** 正在跑的 claude 会话 id（读 `~/.claude/sessions/*.json`）。 */
@@ -129,8 +131,10 @@ export function runningSessionIds(sessionsDir?: string): Set<string> {
     try {
       const j = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { sessionId?: string; status?: string }
       if (typeof j.sessionId !== 'string') continue
-      // busy/idle 都算「活着」；closed 之类不算
-      if (j.status === 'busy' || j.status === 'idle') out.add(j.sessionId)
+      // busy/idle/shell 都算「活着」。`shell` 是窗口开在 shell 里（本机 4 个注册文件里 2 个是它）；
+      // 只认 busy/idle 会把活窗口判成没在跑，`#resume` 就对同一会话再起一个进程。
+      // closed/exited 之类不算。
+      if (j.status === 'busy' || j.status === 'idle' || j.status === 'shell') out.add(j.sessionId)
     } catch {
       /* 单个文件坏了不影响整体 */
     }
@@ -143,10 +147,17 @@ export function runningSessionIds(sessionsDir?: string): Set<string> {
  * 标题优先用 claude 自己写的 `aiTitle`（等同 `/rename` 的名字）；没有才退回首条 user 文本。
  * 参考项目的口径也是这样——首条 user 常常是 `<local-command-caveat>` 这类噪音。
  */
-export function transcriptMeta(file: string): { title: string; userTurns: number; cwd?: string } {
+export function transcriptMeta(file: string): {
+  title: string
+  userTurns: number
+  cwd?: string
+  /** `cli` = 用户开的终端；`sdk-cli` = `-p` 一次性调用（平台自己的摘要/分类子进程）。 */
+  entrypoint?: string
+} {
   try {
     const size = statSync(file).size
-    if (size < 200) return { title: '', userTurns: 0 }
+    // 空文件才跳过：刚起的会话转录可能只有几十字节，但入口标记就在里面
+    if (size === 0) return { title: '', userTurns: 0 }
     const start = Math.max(0, size - 200_000)
     const buf = readFileSync(file).subarray(start)
     const text = buf.toString('utf8')
@@ -164,6 +175,7 @@ export function transcriptMeta(file: string): { title: string; userTurns: number
 
     const aiTitle = pickLast(/"aiTitle":"((?:[^"\\]|\\.)*)"/g)
     const cwd = pickLast(/"cwd":"((?:[^"\\]|\\.)*)"/g)
+    const entrypoint = pickLast(/"entrypoint":"((?:[^"\\]|\\.)*)"/g)
     const userTurns = (text.match(/"type":"user"/g) ?? []).length
 
     let title = aiTitle ?? ''
@@ -185,7 +197,7 @@ export function transcriptMeta(file: string): { title: string; userTurns: number
         }
       }
     }
-    return { title, userTurns, cwd }
+    return { title, userTurns, cwd, entrypoint }
   } catch {
     return { title: '', userTurns: 0 }
   }
@@ -289,6 +301,7 @@ export function discoverLiveSessions(opts: {
         lastActive: mtime,
         userTurns: meta?.userTurns ?? 0,
         running: true,
+        entrypoint: meta?.entrypoint,
       })
     } catch {
       /* 坏登记跳过 */
@@ -345,15 +358,18 @@ export function parseAgentsJson(text: string): AgentRecord[] {
 /** 把 agents 记录转成端口契约的历史会话（只保留 allowRoots 内的）。 */
 export function liveFromAgents(
   records: readonly AgentRecord[],
-  opts: { roots: readonly string[]; maxAgeDays?: number; nowMs?: number },
+  opts: { roots: readonly string[]; maxAgeDays?: number; nowMs?: number; projectsDir?: string },
 ): SessionHistory[] {
   const maxAge = (opts.maxAgeDays ?? 5) * 24 * 3600_000
   const now = opts.nowMs ?? Date.now()
+  const base = opts.projectsDir ?? join(homedir(), '.claude', 'projects')
   const out: SessionHistory[] = []
   for (const a of records) {
     if (!underRoots(a.cwd, opts.roots)) continue
     const lastActive = a.startedAt ?? now
     if (now - lastActive > maxAge) continue
+    // agents 不给入口标记，只能回转录里看：`-p` 一次性调用与用户终端在 agents 里长得一样
+    const file = findTranscriptOf(base, a.sessionId)
     out.push({
       sessionId: a.sessionId,
       cwd: a.cwd,
@@ -362,6 +378,7 @@ export function liveFromAgents(
       userTurns: 0,
       running: true,
       status: a.status,
+      entrypoint: file ? transcriptMeta(file).entrypoint : undefined,
     })
   }
   out.sort((a, b) => b.lastActive - a.lastActive)

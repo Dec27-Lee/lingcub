@@ -1,0 +1,90 @@
+# ops 套件：执行真相。runner 只读本文件；规范见 tests/README.md。
+# 每条 scenario 对应一个可独立运行的测试文件，command 必须能直接跑通。
+suite: ops
+domain: ops
+scenarios:
+  - id: OPS-UNIT-001
+    title: Windows 自启：装 .vbs、窗口样式 0，且能清掉旧的 .cmd
+    layer: unit
+    priority: P2
+    tags:
+      - ops
+      - autostart
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/ops/autostart.test.ts
+    assertions:
+      - Windows 自启：装 .vbs、窗口样式 0，且能清掉旧的 .cmd
+      - mac / linux 自启：都指向 run-lingcub.sh，子命令由看门狗兜底
+      - findRoot：从当前目录向上找到带包标记的项目根
+    timeoutSec: 60
+    file: tests/specs/ops/autostart.test.ts
+  - id: OPS-E2E-002
+    title: 装钩子时清掉旧桥接留下的钩子，并且同一条命令只留一份
+    layer: e2e
+    priority: P2
+    tags:
+      - ops
+      - hooks
+      - install
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/ops/hooks-install.test.ts
+    assertions:
+      - 装钩子时清掉旧桥接留下的钩子，并且同一条命令只留一份
+    timeoutSec: 120
+    file: tests/specs/ops/hooks-install.test.ts
+  - id: OPS-UNIT-003
+    title: 看门狗：不给子命令时默认 run
+    layer: unit
+    priority: P2
+    tags:
+      - ops
+      - supervise
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/ops/supervise.test.ts
+    assertions:
+      - 看门狗：不给子命令时默认 run
+      - 看门狗退避：1-4 次 5 秒，5-19 次 30 秒，20 次以上 300 秒
+      - 看门狗：主动重启与「活过一阵才崩」都清零，快速崩才累加
+    timeoutSec: 60
+    file: tests/specs/ops/supervise.test.ts
+  - id: OPS-UNIT-004
+    title: 切换检查：场景开关与插件配套
+    layer: unit
+    priority: P2
+    tags:
+      - ops
+      - switch
+      - preflight
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/ops/switch-preflight.test.ts
+    assertions:
+      - 切换检查：场景开关与插件配套
+      - 切换检查：pipeline 档却启用场景会双回
+      - 切换检查：bus 不支持新话题开窗策略
+      - 切换检查：v1/v2 卡源不能同时开
+    timeoutSec: 60
+    file: tests/specs/ops/switch-preflight.test.ts
+  - id: OPS-E2E-005
+    title: 切换预演：列出四步且声明「没做任何事」
+    layer: e2e
+    priority: P2
+    tags:
+      - ops
+      - switch
+      - e2e
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/ops/switch.test.ts
+    assertions:
+      - 切换预演：列出四步且声明「没做任何事」
+      - 回滚预演：说清停什么、还原什么，并提醒旧桥接要手动拉起
+      - 安全闸：只给 --apply 而没有确认变量时，一行都不动
+      - 回滚同样要确认变量
+      - 切换脚本：锁文件是纯 pid 字符串也要认得出来（否则永远看不到 lingcub 在跑）
+      - 切换判定：看门狗先停、自己的消费不动、别人的才停（含父子链传递）
+      - 回滚核对清单：说清要看什么，不写「应该好了」
+    timeoutSec: 120
+    file: tests/specs/ops/switch.test.ts

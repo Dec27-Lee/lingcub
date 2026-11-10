@@ -78,13 +78,22 @@ export function renderQuestion(q: PendingQuestion): string {
   return head + (opts.length ? `\n${opts.join('\n')}` : '') + tail
 }
 
-/** 钩子该返回的内容；没有答案就返回空对象（让终端弹窗照常出现）。 */
+/**
+ * 钩子该返回的内容；没有答案就返回空对象（让终端弹窗照常出现）。
+ *
+ * 必须包在 `hookSpecificOutput` 里（参考项目 `plugins/ask/hooks/ask-question.js:96` 的生产写法）。
+ * 顶层平铺 `{ permissionDecision, updatedInput }` 是旧写法，Claude Code 不认，
+ * 表现为「飞书上答了，终端还在等」。
+ */
 export function buildHookDecision(q: PendingQuestion): Record<string, unknown> {
   const answered = q.questions.filter((x) => q.answers[x.question] !== undefined)
   if (!answered.length) return {}
   return {
-    permissionDecision: 'allow',
-    updatedInput: { questions: q.questions, answers: q.answers },
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+      updatedInput: { questions: q.questions, answers: q.answers },
+    },
   }
 }
 

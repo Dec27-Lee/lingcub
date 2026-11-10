@@ -90,11 +90,20 @@ export const ConfigSchema = z.object({
       mappingTtlDays: z.number().positive().default(14),
       questionTtlHours: z.number().positive().default(2),
       maxLogBytes: z.number().positive().default(5 * 1024 * 1024),
+      /**
+       * 我们自己发起的一次性会话（分析/分类）的转录保留天数，按记录的会话 id 删。
+       * 1 天就够：这些转录只在排查「这一轮分类为什么这么判」时回看，钉钉来源的
+       * 分析调用一次 300KB 上下，堆两天就是几百兆。
+       */
+      spawnTtlDays: z.number().positive().default(1),
     })
     .default({}),
 
-  /** 上下文窗口大小：通知里用量那一行的分母（拿不到真实值时的兜底） */
-  contextWindow: z.number().positive().default(200_000),
+  /**
+   * 上下文窗口大小：用量那一行的分母，**只是兜底**。
+   * 优先用 claude 自己声明的窗口（`CLAUDE_CODE_AUTO_COMPACT_WINDOW`）；0 = 不知道，就不画百分比。
+   */
+  contextWindow: z.number().nonnegative().default(0),
 
   /** 自动回复：窗口停下或跑太久时替你说一句（参考项目 auto-reply 插件） */
   auto_reply: z
@@ -142,7 +151,13 @@ export const ConfigSchema = z.object({
       replyCooldownMs: z.number().int().nonnegative().default(10_000),
       /** 状态卡按这个间隔刷执行器进度（0 = 不刷） */
       cardRefreshMs: z.number().int().nonnegative().default(2000),
-      /** 一个会话多久没动静就不再算「活着」：撤置顶、标 stopped（用户口径 30 分钟） */
+      /**
+       * 预留：目前**不参与任何判定**。
+       *
+       * 曾经用它判「多久没动静 = 窗口关了 → 撤置顶」，结果把「开着但没人说话」的窗口判死
+       * （2026-11-09：claude 一轮结束丢置顶、dsh 每半小时丢一次）。现在「还开着吗」只看会话状态，
+       * 保留字段只为兼容已有的 `data/local.json` 覆盖层。
+       */
       staleMinutes: z.number().int().positive().default(30),
       /** 判「窗口已关」前的保护期：刚建/刚活动过的先不动，避免误杀 */
       closeGraceMinutes: z.number().int().nonnegative().default(2),
@@ -152,6 +167,12 @@ export const ConfigSchema = z.object({
       adoptIntervalSeconds: z.number().int().positive().default(20),
       /** 一轮最多接几个，避免一次冒出一堆话题 */
       adoptPerRun: z.number().int().positive().default(2),
+      /**
+       * dsh 会话要「这么新」才算刚打开的窗口（分钟）。
+       * dsh 没有窗口概念，只能按「文件最近被写过」推断在跑；把去年建的会话翻开写一行也会命中，
+       * 所以再按创建时间挡一道：只接真正新开的。
+       */
+      adoptNewMinutes: z.number().int().positive().default(10),
     })
     .default({}),
   limits: z

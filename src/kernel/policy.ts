@@ -10,7 +10,6 @@
  * 闸只回答「这个档位是否允许产生副作用」。
  */
 
-import type { CapabilityEffect } from '../domain/events.ts'
 import type { Log } from '../domain/ports.ts'
 import type { Config } from './config.ts'
 import type { Gate, GateDecision, GateInput } from './capabilities.ts'

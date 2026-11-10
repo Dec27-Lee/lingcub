@@ -241,6 +241,39 @@ export function renderSettledCard(a: { question?: string; answer?: string }): un
   }
 }
 
+/**
+ * 「人在电脑前」的提醒卡：**不带按钮**。
+ *
+ * 这时终端里的弹窗是照常出现的，飞书这张只是让手机上瞄得到「有个窗口在等你」。
+ * 带按钮会让人以为要在飞书答，点了又什么都发生不了（钩子根本没挂起等）。
+ */
+export function renderHereNoticeCard(a: {
+  noticeKind: 'question' | 'permission'
+  question?: string
+  toolName?: string
+  workspace?: string
+}): unknown {
+  const isPerm = a.noticeKind === 'permission'
+  const what = isPerm ? `🔧 工具：\`${a.toolName ?? ''}\`` : `**${a.question ?? ''}**`
+  return {
+    config: { wide_screen_mode: true },
+    header: {
+      template: 'blue',
+      title: { tag: 'plain_text', content: isPerm ? '🔐 窗口在等你确认操作' : '❓ 窗口在等你答题' },
+    },
+    elements: [
+      ...(a.workspace ? [{ tag: 'markdown', content: `📁 \`${a.workspace}\`` }] : []),
+      ...(what ? [{ tag: 'markdown', content: what }] : []),
+      { tag: 'hr' },
+      {
+        tag: 'markdown',
+        content:
+          "你正在电脑前，所以**弹窗已经出在那个终端窗口里了**，直接去窗口里操作即可。\n<font color='grey'>这张卡只是提醒，不用在这里答。</font>",
+      },
+    ],
+  }
+}
+
 /** 工具授权卡：标题橙色、四个按钮，说清「不答一直等」。 */
 export function renderPermissionCard(a: {
   id: string
@@ -313,7 +346,7 @@ export function renderQuestionCard(a: {
     value: { k: 'ans', qid: a.id, n: i, label: o.label },
   }))
 
-  const head = `**${a.header ? `${a.header}：` : ''}${a.question}**`
+  const head = `**${a.header ? `${a.header}：` : ''}${a.question}**${hidden > 0 ? `（另有 ${hidden} 个没列出）` : ''}`
   const counter = a.total > 1 ? `（第 ${a.index}/${a.total} 题）` : ''
   const tip = a.multiSelect
     ? '多选：点选项先攒着（再点一下取消），选完点「✅ 就这些」；也可以直接回文字「A, B」。'
