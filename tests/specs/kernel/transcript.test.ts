@@ -4,15 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import {
-  contextBar,
-  findTranscript,
-  formatTokens,
-  lastUserInput,
-  statsLine,
-  transcriptStats,
-  unwrapPasted,
-} from '../../../src/kernel/transcript.ts'
+import { contextBar, findTranscript, formatTokens, lastUserInput, statsLine, transcriptStats, unwrapPasted, scanTranscriptStats, formatStatsLine } from '../../../src/kernel/transcript.ts'
 import { formatStopMessage } from '../../../src/kernel/hook-handlers.ts'
 
 function tmp(name: string, body: string): string {
@@ -334,4 +326,38 @@ test('会话真名：优先 claude 自己的 aiTitle，多次出现取最后一�
 
   const d = tmp('t4.jsonl', JSON.stringify({ type: 'user', message: { content: '还没起名字' } }) + '\n')
   assert.equal(transcriptTitle(d), undefined)
+})
+
+test('短 id 也能找到转录：claude 的 agents --json 只给 8 位，文件名却是完整 uuid', () => {
+  const root = mkdtempSync(join(tmpdir(), 'lingcub-txfind-'))
+  mkdirSync(join(root, 'E--Develop-E-tt'), { recursive: true })
+  const full = join(root, 'E--Develop-E-tt', 'c510e321-4f0a-402a-a796-402bd5e25264.jsonl')
+  writeFileSync(full, '{}\n')
+  assert.equal(findTranscript('c510e321', root), full, '短 id 要按前缀认出来')
+  assert.equal(findTranscript('c510e321-4f0a-402a-a796-402bd5e25264', root), full, '完整 id 仍然精确命中')
+  assert.equal(findTranscript('deadbeef', root), undefined, '认不出就是认不出，不许瞎配')
+})
+
+test('超大转录只读尾部：累计量当下限报，不把上百 MB 全读进内存', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lingcub-txbig-'))
+  const f = join(dir, 'big.jsonl')
+  const lines: string[] = []
+  for (let i = 0; i < 300; i++) {
+    lines.push(JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 10 } } }))
+  }
+  writeFileSync(f, lines.join('\n') + '\n')
+
+  // 把阈值压到极小，等价于「文件远大于阈值」
+  const big = scanTranscriptStats(f, { fullMax: 1024, tail: 2048 })
+  assert.ok(big, '要能算出统计')
+  assert.equal(big!.truncated, true, '要标成截断')
+  assert.equal(big!.used, 100, '最后一次请求的占用仍然准')
+  assert.ok(big!.total > 0 && big!.total < 300 * 110, `total 只算尾部：${big!.total}`)
+  assert.ok(formatStatsLine(big!, 200_000).includes('Tokens ≥'), '累计量必须标下限，不能伪装成全量')
+
+  // 小文件走全量，不带下限标记
+  const small = scanTranscriptStats(f, { fullMax: 10 * 1024 * 1024, tail: 2048 })
+  assert.equal(small!.truncated, undefined)
+  assert.equal(small!.total, 300 * 110, '全量扫描时累计量准确')
+  assert.ok(!formatStatsLine(small!, 200_000).includes('≥'))
 })

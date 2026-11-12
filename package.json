@@ -1,6 +1,6 @@
 {
   "name": "@yue/lingcub",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Lingcub — 你的 AI 调度台：消息进，任务出，结果回来",
   "type": "module",
   "bin": { "lingcub": "./dist/main.js" },

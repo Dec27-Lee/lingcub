@@ -302,6 +302,22 @@ const MIGRATIONS: readonly ((db: DatabaseSync) => void)[] = [
     const cols = new Set((db.prepare('PRAGMA table_info(sessions)').all() as { name: string }[]).map((c) => c.name))
     if (!cols.has('last_replied_turn')) db.exec('ALTER TABLE sessions ADD COLUMN last_replied_turn TEXT')
   },
+  /**
+   * 卡是否已离开话题根。
+   *
+   * 话题根若是老 schema（schemaV1）的卡，飞书**永远**不让改（`schemaV2 card can not change schemaV1`），
+   * 只能在同一话题里换一张新卡；`detached = 1` 表示「这张卡不在根上」，
+   * `reconcilePins` 的「迁回话题根」必须跳过它，否则换一张、下一拍又被迁回去。
+   *
+   * 这条一开始被我插进了数组中间，线上库 `user_version=16` 已经越过那个下标，
+   * 于是永远不会执行（测试用新库全跑，所以绿）。**只能追加到末尾**。
+   * 真正保证线上库长出这一列的是 `REQUIRED_COLUMNS` 里的同名条目——
+   * 迁移数组只管「新库从头建起」，老库靠 `ensureColumns` 每次打开幂等补。
+   */
+  (db) => {
+    const cols = new Set((db.prepare('PRAGMA table_info(cards)').all() as { name: string }[]).map((c) => c.name))
+    if (!cols.has('detached')) db.exec('ALTER TABLE cards ADD COLUMN detached INTEGER NOT NULL DEFAULT 0')
+  },
 ]
 
 interface EventRow {
@@ -481,6 +497,7 @@ const REQUIRED_COLUMNS: readonly { table: string; column: string; ddl: string }[
   { table: 'outbox', column: 'not_before', ddl: 'ALTER TABLE outbox ADD COLUMN not_before INTEGER NOT NULL DEFAULT 0' },
   { table: 'sessions', column: 'root_message_id', ddl: 'ALTER TABLE sessions ADD COLUMN root_message_id TEXT' },
   { table: 'sessions', column: 'last_stop_at', ddl: 'ALTER TABLE sessions ADD COLUMN last_stop_at TEXT' },
+  { table: 'cards', column: 'detached', ddl: 'ALTER TABLE cards ADD COLUMN detached INTEGER NOT NULL DEFAULT 0' },
   { table: 'questions', column: 'draft', ddl: 'ALTER TABLE questions ADD COLUMN draft TEXT' },
   { table: 'questions', column: 'card_message_id', ddl: 'ALTER TABLE questions ADD COLUMN card_message_id TEXT' },
 ]
@@ -1470,11 +1487,15 @@ export class Store {
   }
 
   /** 状态卡：一个会话一张，记下 message_id 与上次内容签名（签名没变就不重发）。 */
-  getCard(sessionId: string): { messageId: string; chatId: string; signature: string } | null {
+  getCard(sessionId: string): { messageId: string; chatId: string; signature: string; detached: boolean } | null {
     const row = this.#db
-      .prepare('SELECT message_id, chat_id, signature FROM cards WHERE session_id = ?')
-      .get(sessionId) as { message_id: string; chat_id: string; signature: string } | undefined
-    return row ? { messageId: row.message_id, chatId: row.chat_id, signature: row.signature } : null
+      .prepare('SELECT message_id, chat_id, signature, detached FROM cards WHERE session_id = ?')
+      .get(sessionId) as
+      | { message_id: string; chat_id: string; signature: string; detached?: number }
+      | undefined
+    return row
+      ? { messageId: row.message_id, chatId: row.chat_id, signature: row.signature, detached: Boolean(row.detached) }
+      : null
   }
 
   /** 只记「这张卡是我们自己置顶的」——取消置顶时才敢动它。 */
@@ -1524,17 +1545,23 @@ export class Store {
     this.setCardPinned(sessionId, true, at)
   }
 
-  upsertCard(sessionId: string, chatId: string, messageId: string, signature: string): void {
+  /**
+   * 记账这张卡。
+   * `detached = true` 表示「话题根那张改不动（老 schema），卡已换到话题内的新消息」——
+   * `reconcilePins` 的「迁回话题根」要跳过它，否则换一张、下一拍又被迁回去，无限循环。
+   */
+  upsertCard(sessionId: string, chatId: string, messageId: string, signature: string, detached = false): void {
     this.#db
       .prepare(
-        `INSERT INTO cards (session_id, chat_id, message_id, signature, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO cards (session_id, chat_id, message_id, signature, updated_at, detached)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            message_id = excluded.message_id,
            signature  = excluded.signature,
-           updated_at = excluded.updated_at`,
+           updated_at = excluded.updated_at,
+           detached   = excluded.detached`,
       )
-      .run(sessionId, chatId, messageId, signature, new Date().toISOString())
+      .run(sessionId, chatId, messageId, signature, new Date().toISOString(), detached ? 1 : 0)
   }
 
   /** 返回 'duplicate' 表示该 dedupeKey 已在队列里，不会再发一次。 */

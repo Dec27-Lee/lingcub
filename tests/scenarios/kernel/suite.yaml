@@ -821,3 +821,23 @@ scenarios:
       - statsLine：有分母画条，没分母只写 token 数
     timeoutSec: 60
     file: tests/specs/kernel/context-window.test.ts
+  - id: KERNEL-UNIT-043
+    title: 读 dsh 多帧 zstd 转录，取最近一轮的助手正文
+    layer: unit
+    priority: P0
+    tags:
+      - kernel
+      - dsh
+      - transcripts
+      - unit
+    status: ready
+    command: node --experimental-strip-types --test tests/specs/kernel/dsh-transcript.test.ts
+    assertions:
+      - 多帧 zstd 按帧魔数切开，逐帧解压后拿到全部记录
+      - 正文只取 text 块：reasoning 与工具调用都不能发出去
+      - 取最后一个已结束的轮次：末轮没跑完就不算
+      - 一轮都没有结束时返回 null
+      - 只有 reasoning 没有正文的轮次不发
+      - 文件不存在时返回 undefined / null，不抛错
+    timeoutSec: 60
+    file: tests/specs/kernel/dsh-transcript.test.ts

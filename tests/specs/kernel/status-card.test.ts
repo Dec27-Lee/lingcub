@@ -80,7 +80,20 @@ async function mount(cardRefreshMs = 2000) {
   } as unknown as Ports
   const projects = { workspaces: [] }
   const outbox = new Outbox(store, createDeliver({ ports, config, projects, store, log: silent }), { log: silent })
-  const pipeline = new Pipeline({ store, outbox, config, projects, rules, ports, sessions: store, log: silent })
+  // 注入 transcripts，别去翻真实的 `~/.claude/projects`：
+  // 这个用例的 sessionId 是真实窗口的短 id，短 id 现在按前缀能命中真实转录（190 MB），
+  // 断言就会被真实内容顶掉（2026-11-10 踩到）。
+  const pipeline = new Pipeline({
+    store,
+    outbox,
+    config,
+    projects,
+    rules,
+    ports,
+    sessions: store,
+    log: silent,
+    transcripts: () => undefined,
+  })
   return { store, outbox, pipeline, sent, patched }
 }
 

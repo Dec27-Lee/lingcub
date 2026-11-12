@@ -10,8 +10,9 @@ import { routeToSession, type SessionLookup } from '../routing/session-route.ts'
 import { pickAnswer, pickPermissionAnswer } from './questions.ts'
 import { HELP_TEXT, parseAbsolutePathCommand, parseCommand } from '../routing/commands.ts'
 import { decideAutoReply } from '../routing/auto-reply.ts'
-import { buildStatusCard, statusCardSignature } from './card-content.ts'
+import { buildStatusCard, formatAgo, statusCardSignature } from './card-content.ts'
 import { buildNoticeCard } from './notice-card.ts'
+import { findDshTranscript, lastDshTurn } from './dsh-transcript.ts'
 import { currentTurn, findTranscript, isTurnOpen } from './transcript.ts'
 import { statsLine } from './transcript.ts'
 import { resolveContextWindow } from './context-window.ts'
@@ -153,6 +154,17 @@ export function isTransientCardError(message: string): boolean {
   return /network|timeout|timed out|deadline|rate limit|too many|429|502|503|504|ECONNRESET|ETIMEDOUT|超时/i.test(
     message,
   )
+}
+
+/**
+ * 旧版（schemaV1）卡片**永远**改不动：飞书返回
+ * `schemaV2 card can not change schemaV1`（code 230099 / ext 200830）。
+ *
+ * 这类卡多是窗口接入之前就存在的（实测 2026-10-30 建的一张卡，到 11-10 才发现一直改不动），
+ * 重试多久都没用，只能在同一话题里发一张新卡。
+ */
+export function isLegacyCardError(message: string): boolean {
+  return /schemaV2 card can not change schemaV1/i.test(message) || /200830/.test(message)
 }
 
 /** 发件箱的投递实现：把 Action 交给对应端口。 */
@@ -392,7 +404,9 @@ export function createDeliver(deps: {
         // 状态卡永远挂在**话题根消息**上：只有根消息在群主消息流的「Pin 消息」面板里可见。
         // 历史上曾把卡换成话题内第 N 条消息（一轮一张），那些消息 pin 了也不出现在面板里。
         const rootId = session.rootMessageId
-        const target = rootId && rootId !== prev?.messageId ? rootId : prev?.messageId
+        // 优先用已经建好的那张卡：它通常就是话题根；也可能是「老 schema 卡不可改」时换出来的新卡
+        // ——再回头去 patch 根只会每次都失败，然后每次都换一张新卡（死循环）。
+        const target = prev?.messageId ?? rootId
         if (prev && prev.signature === action.signature && target === prev.messageId) {
           log('debug', `状态卡没变，跳过 ${session.id}`)
           return
@@ -406,12 +420,38 @@ export function createDeliver(deps: {
               // 临时失败（网络/超时/限流）：这张卡还会被重试，别换卡——换卡会连带把它的置顶弄丢
               throw new Error(`改卡临时失败（下一轮重试，保留原卡）：${msg}`)
             }
+            if (isLegacyCardError(msg)) {
+              // 老 schema 的卡改不动，重试多久都没用：在同一话题里发一张新的，之后改新的那张。
+              // 代价是它不在主消息流，「Pin 消息」面板里看不到——但「内容能更新」比「面板里有一行」重要。
+              const fresh = await ch.sendCard(
+                {
+                  chatId: session.chatId,
+                  replyTo: session.rootMessageId ?? session.threadId,
+                  card: action.card,
+                  pin: false,
+                },
+                `${key}:card-legacy`,
+              )
+              if (!fresh.messageId) throw new Error('老 schema 换新卡失败：发卡没拿到消息 id')
+              store.upsertCard(session.id, session.chatId, fresh.messageId, action.signature, true)
+              await ensureCardPinned(ch, session.id, fresh.messageId)
+              log('warn', `状态卡是老 schema（改不动），已换新卡：${session.id} → ${fresh.messageId}`)
+              return
+            }
             // 根消息改不动（超 14 天、被撤回）：**不能换**——话题根换了，话题就断了。
             // 记一条警告，等人工处理；继续用这张卡显示旧内容，总比整个窗口失联好。
             log('warn', `状态卡改不动（话题根，不换卡）：${session.id} — ${msg}`)
             throw new Error(`改卡失败（话题根不可替换）：${msg}`)
           }
-          store.upsertCard(session.id, prev?.chatId ?? session.chatId, target, action.signature)
+          // 保住 `detached`：它记的是「这张卡不在话题根」这个事实，
+          // 改一次内容就被重置成 false 的话，下一拍对账又会把卡迁回那个改不动的根。
+          store.upsertCard(
+            session.id,
+            prev?.chatId ?? session.chatId,
+            target,
+            action.signature,
+            prev?.detached ?? false,
+          )
           // 改卡成功 ≠ 还钉着：平台侧撤过、历史上没钉上的卡，都在这里补回来
           await ensureCardPinned(ch, session.id, target)
           log('info', `状态卡已更新：${session.id}`)
@@ -645,6 +685,14 @@ export class Pipeline {
   readonly #ownTopicCache = new Map<string, { own: boolean; at: number }>()
   /** 卡片进度刷新的节流表（只影响观感，不必落库） */
   readonly #cardRefreshedAt = new Map<string, number>()
+  /**
+   * 上次**真正画完**一张卡的时间。
+   *
+   * 和 `#cardRefreshedAt`（节流用，进函数就写）不是一回事：这个只在 enqueue 之后写。
+   * 卡上有相对时间（`本轮结束 · 刚刚`、`已 3 分`），同一轮里一直跳过重画，它就会
+   * 永远停在那一刻——2026-11-11 实测有个窗口的卡写着「刚刚」，实际是 20 小时前画的。
+   */
+  readonly #cardDrawnAt = new Map<string, number>()
   /** 自动回复巡检的节流时间戳 */
   #lastAutoReplyPoll = 0
   /** 置顶列表对账的节流时间戳（listPins 是一次真接口调用，别跟着每轮 tick 打） */
@@ -2016,6 +2064,9 @@ export class Pipeline {
             // dsh 没有进程状态：扫到「会话文件还在动」就是它在活动的唯一证据。
             // 不刷新活跃时间的话，你明明在用、只是没说话，半小时后也会被标 idle → 撤掉置顶（2026-11-09 反复出现）。
             store.touchSession(known.id)
+            // dsh 也没有钩子：转录里的 `turn/end` 是「这一轮跑完了」的唯一信号。
+            // 不接这一条，从飞书看这个窗口就只有「在跑 / 空闲」而永远没有回复（2026-11-10 用户报「没看到你发送的消息」）。
+            this.#deliverDshTurn(known, store, outbox, log)
           }
           continue
         }
@@ -2082,7 +2133,9 @@ export class Pipeline {
       }
       // 历史上状态卡曾发到话题内（一轮一张），那些消息 pin 了也不出现在群主消息流的置顶面板里。
       // 卡记录指回话题根，pin 才会跟着根走——根是唯一在主消息流可见的那条。
-      if (usable && s.rootMessageId && usable.messageId !== s.rootMessageId) {
+      // 换过卡的不迁回（`detached`）：话题根是老 schema、永远改不动，
+      // 迁回去下一拍又得换一张，来回拉锯。
+      if (usable && s.rootMessageId && usable.messageId !== s.rootMessageId && !usable.detached) {
         store.upsertCard(s.id, usable.chatId, s.rootMessageId, usable.signature)
         log('info', `状态卡迁回话题根：${s.id} → ${s.rootMessageId}`)
       }
@@ -2193,6 +2246,43 @@ export class Pipeline {
    * 活动时间来自 `adoptLocalWindows` 每 20 秒的扫描（扫到会话文件在动就 touch），
    * 所以它反映的是「这个窗口有没有在写东西」，不是「用户多久没说话」。
    */
+  /**
+   * dsh 窗口的结果回传。
+   *
+   * claude 靠 Stop 钩子把回复送回来；dsh 没有钩子，只能读它自己的转录
+   * （`~/.dsh/sessions/<slug>/<id>/session.v*.jsonl.zstd`，多帧 zstd，解析见 `dsh-transcript.ts`）。
+   * 判重按 `turn/end` 的 seq：同一轮只发一次，重启也不会重发。
+   */
+  #deliverDshTurn(s: Session, store: Store, outbox: Outbox, log: Log): number {
+    if (!s.sessionId || !s.chatId) return 0
+    const file = findDshTranscript(s.sessionId)
+    if (!file) return 0
+    const turn = lastDshTurn(file)
+    if (!turn) return 0
+    if (store.lastRepliedTurn(s.id) === turn.id) return 0
+    outbox.enqueue(
+      {
+        kind: 'card_send',
+        sessionId: s.id,
+        chatId: s.chatId,
+        replyTo: s.rootMessageId ?? s.threadId,
+        card: buildNoticeCard({
+          title: s.title ?? s.id,
+          cwd: s.workspace,
+          time: new Date(turn.endedAt ?? Date.now()).toLocaleTimeString('zh-CN', { hour12: false }),
+          userSaid: turn.said,
+          body: turn.text,
+          index: 1,
+          total: 1,
+        }),
+      },
+      dedupeKey(s.id, `dsh-turn-${turn.id}`),
+    )
+    store.markReplied(s.id, turn.id)
+    log('info', `dsh 结果回传：${s.id}（第 ${turn.id} 轮）`)
+    return 1
+  }
+
   #refreshFactsCard(
     s: Session,
     store: Store,
@@ -2204,14 +2294,16 @@ export class Pipeline {
     const stopAt = facts?.lastStopAt ? Date.parse(facts.lastStopAt) : Number.NaN
     const fresh = Number.isFinite(activeAt) && Date.now() - activeAt < 120_000
     const running = s.status === 'active' && fresh && !(Number.isFinite(stopAt) && stopAt > activeAt)
-    const ago = Number.isFinite(activeAt) ? formatElapsed(Math.max(0, Date.now() - activeAt)) : '未知'
+    // **必须用分钟粒度**（`刚刚` / `N 分钟前`）：`normalizeCardLine` 会把「12 秒」整段抹掉，
+    // 抹完签名成了常量 → 入队键永久命中判重 → 卡冻在第一次画的那一刻（2026-11-10 实测冻了 8 小时）。
+    const ago = Number.isFinite(activeAt) ? formatAgo(Math.max(0, Date.now() - activeAt)) : '未知'
     const said = (facts?.lastText ?? '').replace(/\s+/g, ' ').trim()
     const card: CardState = {
       title: s.title ?? s.id,
       status: running ? 'running' : 'done',
       lines: [
         ...(said ? [`💬 你说：${said.length > 60 ? `${said.slice(0, 60)}…` : said}`] : []),
-        running ? `🟢 在跑（最近活跃 ${ago}）` : `⚪ 空闲（最后活跃 ${ago}）`,
+        running ? `🟢 在跑 · 最近活跃 ${ago}` : `⚪ 空闲 · 最近活跃 ${ago}`,
         `📁 \`${s.workspace}\``,
         'dsh 的过程细节（工具、改动文件）没有可读转录，这里只反映窗口是否在动',
       ],
@@ -2239,10 +2331,16 @@ export class Pipeline {
     if (refreshMs <= 0) return 0
     const last = this.#cardRefreshedAt.get(s.id) ?? 0
     if (Date.now() - last < refreshMs) return 0
-    if (!s.sessionId) return 0
+    if (!s.sessionId) {
+      log('debug', `卡跳过（会话没有 sessionId）：${s.id}`)
+      return 0
+    }
     const ws = projects.workspaces.find((w) => w.id === s.workspace) ?? { id: s.workspace, root: s.workspace }
     const executor = ws ? executorPort(ports, config, s.executor) : null
-    if (!ws || !executor) return 0
+    if (!ws || !executor) {
+      log('debug', `卡跳过（工作区或执行器没解析出来）：${s.id}`)
+      return 0
+    }
     this.#cardRefreshedAt.set(s.id, Date.now())
     let progress: Progress[]
     try {
@@ -2261,6 +2359,12 @@ export class Pipeline {
     if (!transcript && !lastLine) {
       // dsh 本来就没有可读转录，用库里的事实画一张会动的卡；
       // claude 读不到转录说明这一拍异常，别拿事实卡去覆盖它正常的进度卡。
+      log(
+        'debug',
+        s.executor === 'dsh'
+          ? `dsh 没有转录，改走事实卡：${s.id}`
+          : `卡跳过（claude 读不到转录，也没有输出行）：${s.id}`,
+      )
       return s.executor === 'dsh' ? this.#refreshFactsCard(s, store, outbox, log) : 0
     }
     // 会话真名（claude 自己的 aiTitle）到位就换掉「用户第一句话当标题」——放在任何 return 之前，
@@ -2301,13 +2405,36 @@ export class Pipeline {
             dedupeKey(s.id, `catchup-reply-${openTurn.userId}`),
           )
           store.markReplied(s.id, openTurn.userId)
-          // 也记成「这张卡画的是这一轮」：否则下一拍又走正常路径，重建出一张进行中的卡
+          // 补发的同时把状态卡也刷成这一轮的收尾：
+          // 这张卡可能停在很久以前（实测有的窗口卡停了一整天，因为它的转录一直找不到），
+          // 只发新消息、不刷卡的话，pin 面板里那条会继续显示旧内容。
           store.setCardTurn(s.id, openTurn.userId)
+          const finalCard = buildStatusCard({
+            session: s,
+            transcript,
+            running: false, // 这一轮已经收尾，别画成「在跑」
+            contextWindow: config.contextWindow,
+          })
+          outbox.enqueue(
+            {
+              kind: 'card_upsert',
+              sessionId: s.id,
+              card: finalCard,
+              signature: cardSignature(finalCard),
+            },
+            dedupeKey(`${s.id}-${cardSignature(finalCard)}`, 'card-final'),
+          )
           log('warn', `钩子没到，补发这一轮的回复：${s.id}（${openTurn.userId.slice(0, 8)}）`)
+          this.#cardDrawnAt.set(s.id, Date.now())
           return 1
         }
       }
-      if (store.cardTurn(s.id) === openTurn.userId) return 0
+      // 同一轮不必每拍重算，但也不能永久跳过：卡上的「刚刚 / 已 N 分」会一直停在旧值。
+      // 一分钟放行一次，正好对上卡片的分钟粒度。
+      if (store.cardTurn(s.id) === openTurn.userId) {
+        const drawnAt = this.#cardDrawnAt.get(s.id) ?? 0
+        if (Date.now() - drawnAt < 60_000) return 0
+      }
     }
     // 有转录就用它画完整的几行（你说/在跑多久/改了哪些文件/它说/用量）；
     // 没有转录才退回「工作区 + 执行器 + 最后一行日志」。
@@ -2341,6 +2468,7 @@ export class Pipeline {
       { kind: 'card_upsert', sessionId: s.id, card, signature: cardSignature(card) },
       dedupeKey(`${s.id}-${cardSignature(card)}`, 'card-progress'),
     )
+    this.#cardDrawnAt.set(s.id, Date.now())
     return 1
   }
 

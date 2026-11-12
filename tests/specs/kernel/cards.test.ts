@@ -11,7 +11,7 @@ import type { CardState, Session, Work } from '../../../src/domain/types.ts'
 import { renderCard, renderHereNoticeCard } from '../../../src/plugins/channel-feishu/card.ts'
 import { Outbox } from '../../../src/kernel/outbox.ts'
 import { createDeliver, isTransientCardError, Pipeline, pickOrphanPins, pickPinsToRestore, windowStillOpen } from '../../../src/kernel/pipeline.ts'
-import { statusCardSignature } from '../../../src/kernel/card-content.ts'
+import { formatAgo, normalizeCardLine, statusCardSignature } from '../../../src/kernel/card-content.ts'
 import { routeToSession } from '../../../src/routing/session-route.ts'
 import { openStore } from '../../../src/kernel/store.ts'
 import type { Config, Projects, Workspace } from '../../../src/kernel/config.ts'
@@ -910,9 +910,92 @@ test('dsh 窗口没有可读转录也要有会动的状态卡：在跑/空闲 + 
     assert.equal(queued.length, 1, '要入队一张状态卡，不能因为读不到转录就什么都不发')
     const card = queued[0]?.kind === 'card_upsert' ? (queued[0].card as { status: string; lines: string[] }) : undefined
     assert.equal(card?.status, 'running', '刚活动过 = 在跑')
-    assert.ok(card?.lines.some((l) => l.includes('🟢 在跑（最近活跃')), '要显示在跑与最近活跃时间')
+    // 分钟粒度是硬要求：秒级文案会被签名抹平，入队键恒定 → 卡冻住（见本文件最后一条用例）
+    assert.ok(card?.lines.some((l) => l.includes('🟢 在跑 · 最近活跃')), '要显示在跑与最近活跃时间')
+    assert.ok(!card?.lines.some((l) => /\d+ 秒/.test(l)), '不能写秒：抹平后签名恒定，卡会冻在这句话上')
     assert.ok(card?.lines.some((l) => l.includes('上一轮跑完了')), '要带上最后一句')
     assert.ok(card?.lines.some((l) => l.includes('E:\\Develop_E')), '要带工作区')
+  } finally {
+    store.close()
+  }
+})
+
+test('相对时间只到分钟：dsh 事实卡用秒级文案会被签名抹平，卡就冻住', () => {
+  assert.equal(formatAgo(0), '刚刚')
+  assert.equal(formatAgo(59_000), '刚刚')
+  assert.equal(formatAgo(60_000), '1 分钟前')
+  assert.equal(formatAgo(59 * 60_000), '59 分钟前')
+  assert.equal(formatAgo(60 * 60_000), '1 小时前')
+  assert.equal(formatAgo(23 * 3_600_000), '23 小时前')
+  assert.equal(formatAgo(24 * 3_600_000), '1 天前')
+  // 机理：签名前会把「12 秒」「45 秒」抹成同一个字符串 → 入队键恒定 → 永久判重、卡冻结
+  assert.equal(
+    normalizeCardLine('⚪ 空闲 · 最近活跃 12 秒'),
+    normalizeCardLine('⚪ 空闲 · 最近活跃 45 秒'),
+    '秒级文案抹完一样，这就是 2026-11-10 卡冻了 8 小时的机理',
+  )
+  // 分钟粒度抹完仍然不同 → 卡才会跟着时间走
+  assert.notEqual(
+    normalizeCardLine('⚪ 空闲 · 最近活跃 1 分钟前'),
+    normalizeCardLine('⚪ 空闲 · 最近活跃 2 分钟前'),
+  )
+})
+
+test('老 schema 的卡永远改不动：换一张新卡，之后改新的那张（不能每拍都换）', async () => {
+  const store = openStore(':memory:')
+  try {
+    store.insertSession(session({ id: 'sess-legacy', sessionId: 'exec-legacy', rootMessageId: 'om_old' }))
+    store.upsertCard('sess-legacy', 'oc_1', 'om_old', 'sig-old')
+    const sent: string[] = []
+    const patched: string[] = []
+    const channel: Channel = {
+      async send() {
+        return { status: 'sent', messageId: 'om_x' }
+      },
+      async sendCard() {
+        const id = `om_new_${sent.length + 1}`
+        sent.push(id)
+        return { status: 'sent', messageId: id }
+      },
+      async patchCard(id: string) {
+        if (id === 'om_old') throw new Error('改卡失败（exit=1）：{"code":230099,"message":"schemaV2 card can not change schemaV1"}')
+        patched.push(id)
+      },
+      async pinMessage() {},
+    }
+    const ports: Ports = {
+      sources: new Map(),
+      classifiers: new Map(),
+      executors: new Map(),
+      channels: new Map([['channel-feishu', channel]]),
+    }
+    const outbox = new Outbox(store, createDeliver({ ports, config: cfg(), projects: projects(), store, log: silent }))
+    const card = (sig: string) => ({ kind: 'card_upsert', sessionId: 'sess-legacy', card: { title: 't', status: 'running', lines: [sig] }, signature: sig }) as never
+
+    outbox.enqueue(card('s1'), 'k1')
+    await outbox.tick()
+    assert.equal(sent.length, 1, '老卡改不动就换一张新卡')
+    assert.equal(store.getCard('sess-legacy')?.messageId, sent[0], '记账要指向新卡，否则下一拍又去改老卡')
+
+    outbox.enqueue(card('s2'), 'k2')
+    await outbox.tick()
+    assert.equal(sent.length, 1, '第二拍不能再换一张：应当去改新卡')
+    assert.deepEqual(patched, [sent[0]], '改的是换出来的那张')
+
+    // 对账不能把卡迁回话题根：根是老 schema、永远改不动，迁回去下一拍又得换一张
+    const pipeline = new Pipeline({
+      store,
+      outbox,
+      config: cfg(),
+      projects: projects(),
+      rules: { rules: [] } as never,
+      ports,
+      sessions: store,
+      log: silent,
+    } as never)
+    await (pipeline as unknown as { reconcilePins: () => Promise<number> }).reconcilePins()
+    assert.equal(store.getCard('sess-legacy')?.messageId, sent[0], '换过卡的不许被迁回话题根')
+    assert.equal(store.getCard('sess-legacy')?.detached, true, '要记住这张卡不在话题根')
   } finally {
     store.close()
   }

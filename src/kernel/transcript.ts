@@ -5,7 +5,7 @@
  * 只读文件，不碰网络；路径由调用方给，方便测试喂临时文件。
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -35,6 +35,33 @@ export function unwrapPasted(text: string): string {
     .trim()
 }
 
+/**
+ * 只读文件尾部若干字节。
+ *
+ * 不能 `readFileSync(file)` 再切：实测有个窗口的转录 **190 MB**，全量读一次就是 190 MB 内存 + 一次大 IO，
+ * 而这个函数每 15 秒就会被叫好几次（状态卡、用量、真名、本轮内容各一次）。
+ */
+function readTail(file: string, maxBytes: number): { text: string; truncated: boolean } | undefined {
+  try {
+    const size = statSync(file).size
+    const len = Math.min(maxBytes, size)
+    const start = size - len
+    const fd = openSync(file, 'r')
+    let buf: Buffer
+    try {
+      buf = Buffer.alloc(len)
+      readSync(fd, buf, 0, len, start)
+    } finally {
+      closeSync(fd)
+    }
+    let text = buf.toString('utf8')
+    if (start > 0) text = text.slice(text.indexOf('\n') + 1) // 第一行是半截
+    return { text, truncated: start > 0 }
+  } catch {
+    return undefined
+  }
+}
+
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content
   if (Array.isArray(content)) {
@@ -56,16 +83,9 @@ function textOf(content: unknown): string {
  * 往前翻会把上一轮终端里的输入顶上来，卡片上就顶着一句早已无关的话。
  */
 export function lastUserInput(file: string, maxBytes = 4 * 1024 * 1024): string | null {
-  let text: string
-  try {
-    const size = statSync(file).size
-    const start = Math.max(0, size - maxBytes)
-    const buf = readFileSync(file)
-    text = buf.subarray(start).toString('utf8')
-    if (start > 0) text = text.slice(text.indexOf('\n') + 1) // 截断出来的第一行必然是半截 JSON
-  } catch {
-    return null
-  }
+  const tail = readTail(file, maxBytes)
+  if (!tail) return null
+  const text = tail.text
 
   const lines = text.split('\n')
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -121,6 +141,8 @@ export interface TranscriptStats {
   used: number
   /** 本会话累计 tokens */
   total: number
+  /** total 只统计了文件尾部（超大转录不做全量扫描），显示时要标成下限 */
+  truncated?: boolean
 }
 
 /** 统计缓存：状态卡 2 秒刷一次，同一个转录没必要每次全量重扫。 */
@@ -141,10 +163,37 @@ export function transcriptStats(file: string): TranscriptStats | null {
   return stats
 }
 
-function scanTranscriptStats(file: string): TranscriptStats | null {
+/** 超过这个大小只读尾部：实测有个窗口的转录 **190 MB**，全量读 + split 会把这台机器打满。 */
+const FULL_SCAN_MAX = 16 * 1024 * 1024
+const TAIL_SCAN = 8 * 1024 * 1024
+
+export function scanTranscriptStats(
+  file: string,
+  limits: { fullMax?: number; tail?: number } = {},
+): TranscriptStats | null {
+  const fullMax = limits.fullMax ?? FULL_SCAN_MAX
+  const tail = limits.tail ?? TAIL_SCAN
   let text: string
+  let truncated = false
   try {
-    text = readFileSync(file, 'utf8')
+    const size = statSync(file).size
+    if (size > fullMax) {
+      // 只读尾部：截断出来的第一行必然是半截 JSON，直接丢掉
+      const len = Math.min(tail, size)
+      const fd = openSync(file, 'r')
+      let buf: Buffer
+      try {
+        buf = Buffer.alloc(len)
+        readSync(fd, buf, 0, len, size - len)
+      } finally {
+        closeSync(fd)
+      }
+      text = buf.toString('utf8')
+      text = text.slice(text.indexOf('\n') + 1)
+      truncated = true
+    } else {
+      text = readFileSync(file, 'utf8')
+    }
   } catch {
     return null
   }
@@ -167,23 +216,29 @@ function scanTranscriptStats(file: string): TranscriptStats | null {
     (lastUsage['input_tokens'] ?? 0) +
     (lastUsage['cache_read_input_tokens'] ?? 0) +
     (lastUsage['cache_creation_input_tokens'] ?? 0)
-  return { used, total }
+  return { used, total, ...(truncated ? { truncated } : {}) }
 }
 
 /**
  * 用量那一行：`📦 ██░░ 21% 108k · Tokens 1.2M`（取不到就空串）。
  * 分母由调用方经 `resolveContextWindow()` 解析；给不出分母就只写 token 数，不画百分比。
  */
-export function statsLine(file: string | undefined, contextWindow: number | undefined): string {
-  if (!file) return ''
-  const s = transcriptStats(file)
-  if (!s) return ''
+/** 用量那一行的文案（纯函数，方便单独测）。 */
+export function formatStatsLine(s: TranscriptStats, contextWindow: number | undefined): string {
   const parts: string[] = []
   const bar = contextBar(s.used, contextWindow)
   if (bar) parts.push(bar)
   parts.push(formatTokens(s.used))
-  if (s.total) parts.push(`· Tokens ${formatTokens(s.total, 1)}`)
+  // 超大转录只扫了尾部，累计量只能当下限报（别把「≥12.3M」写成「12.3M」）
+  if (s.total) parts.push(`· Tokens ${s.truncated ? '≥' : ''}${formatTokens(s.total, 1)}`)
   return parts.join(' ')
+}
+
+export function statsLine(file: string | undefined, contextWindow: number | undefined): string {
+  if (!file) return ''
+  const s = transcriptStats(file)
+  if (!s) return ''
+  return formatStatsLine(s, contextWindow)
 }
 
 /** 在 `~/.claude/projects/*` 下按会话 id 找转录文件；找不到返回 undefined。 */
@@ -194,6 +249,19 @@ export function findTranscript(sessionId: string | undefined, projectsDir?: stri
   for (const slug of readdirSync(base)) {
     const p = join(base, slug, `${sessionId}.jsonl`)
     if (existsSync(p)) return p
+  }
+  // `claude agents --json` 只给 8 位短 id，而转录文件名是完整 uuid。
+  // 不认这个前缀，接入的窗口就永远找不到自己的转录 → 状态卡停在接入那一刻
+  // （2026-11-10 实测：s-attach-c510e321 的卡一整天没动，库里 108 个会话里只有它一个是短 id）。
+  for (const slug of readdirSync(base)) {
+    let names: string[]
+    try {
+      names = readdirSync(join(base, slug))
+    } catch {
+      continue
+    }
+    const hit = names.find((n) => n.endsWith('.jsonl') && n.startsWith(`${sessionId}-`))
+    if (hit) return join(base, slug, hit)
   }
   return undefined
 }
@@ -257,15 +325,8 @@ export function isHumanUserLine(line: string): boolean {
 
 /** 只读尾部若干字节就够：状态卡 2 秒刷一次，不能整文件读。 */
 function tailLines(file: string, maxBytes = 512 * 1024): string[] | null {
-  try {
-    const size = statSync(file).size
-    const start = Math.max(0, size - maxBytes)
-    let text = readFileSync(file).subarray(start).toString('utf8')
-    if (start > 0) text = text.slice(text.indexOf('\n') + 1)
-    return text.split('\n')
-  } catch {
-    return null
-  }
+  const tail = readTail(file, maxBytes)
+  return tail ? tail.text.split('\n') : null
 }
 
 /** 只看最后一条 user 之后的内容（= 本轮）。 */
@@ -379,12 +440,9 @@ export function formatElapsed(ms: number): string {
  * 而不是把用户第一句话原样当标题。
  */
 export function transcriptTitle(file: string): string | undefined {
-  let text: string
-  try {
-    text = readFileSync(file, 'utf8').slice(-200_000)
-  } catch {
-    return undefined
-  }
+  const tail = readTail(file, 200_000)
+  if (!tail) return undefined
+  const text = tail.text
   // 后写的覆盖先写的：同一个键出现多次时取最后一次
   const picked = (re: RegExp): string | undefined => {
     let last: string | undefined
